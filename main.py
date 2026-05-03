@@ -2,35 +2,49 @@ from market_data import get_stock_data, compute_indicators
 from analyzer import analyze_stock
 from ai_analyst import ai_decision
 from market_filter import get_market_bias, market_allows_setup
-import asyncio
-from chart_ai import analyze_chart_ai
+from telegram_alert import send_telegram
+import time
 
 WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]
 
-market = get_market_bias()
-print("\n=== MARKET ===")
-print(market)
+while True:
+    print("\n===== NEW SCAN =====")
 
-for symbol in WATCHLIST:
-    try:
-        df = get_stock_data(symbol)
-        df = compute_indicators(df)
-        analysis = analyze_stock(df)
+    market = get_market_bias()
+    print("Market:", market)
 
-        allowed, reason = market_allows_setup(analysis["signal"], market["bias"])
+    for symbol in WATCHLIST:
+        try:
+            df = get_stock_data(symbol)
+            df = compute_indicators(df)
+            analysis = analyze_stock(df)
 
-        if not allowed:
-            print(f"\n=== {symbol} ===")
-            print("Skipped:", reason)
-            continue
+            allowed, reason = market_allows_setup(analysis["signal"], market["bias"])
 
-        ai_output = ai_decision(symbol, analysis)
-        chart_ai_output = asyncio.run(analyze_chart_ai(symbol))
+            if not allowed:
+                continue
 
-        print(f"\n=== {symbol} ===")
-        print("Analysis:", analysis)
-        print("AI Decision:", ai_output)
-        print("Chart AI:", chart_ai_output)
+            if not analysis["a_plus"]:
+                continue
 
-    except Exception as e:
-        print(f"Error processing {symbol}: {e}")
+            ai_output = ai_decision(symbol, analysis)
+
+            message = f"""
+🚀 {symbol} A+ Setup
+
+Signal: {analysis['signal']}
+Entry: {analysis['entry']}
+Price: {analysis['price']}
+Score: {analysis['score']}
+
+AI:
+{ai_output}
+"""
+
+            print(message)
+            send_telegram(message)
+
+        except Exception as e:
+            print(f"Error {symbol}: {e}")
+
+    time.sleep(300)

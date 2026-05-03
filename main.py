@@ -8,7 +8,31 @@ from sector_filter import sector_confirm
 from storage import save_result
 import time
 
-WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]
+WATCHLIST = [
+    # 🔥 Mega Cap Momentum
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
+
+    # ⚡ High Beta / Movers
+    "AMD","NFLX","SHOP","COIN","ROKU","PLTR",
+
+    # 🧠 AI / Semiconductor Leaders
+    "SMH","MU","AVGO","LRCX","KLAC","ASML",
+
+    # 🚗 EV / Growth
+    "RIVN","LCID","NIO",
+
+    # 📊 ETFs (Market + Sector)
+    "SPY","QQQ","IWM","SMH","XLF","XLE",
+
+    # 🛢️ Energy / Commodities Momentum
+    "XOM","CVX","SLB",
+
+    # 🏦 Financial Movers
+    "JPM","GS","BAC",
+
+    # 🧪 Biotech (volatile movers)
+    "MRNA","REGN","VRTX"
+]
 
 while True:
     print("\n===== NEW SCAN =====")

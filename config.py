@@ -5,10 +5,6 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
     
-OPENAI_API_KEY = "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"
-POLYGON_API_KEY = "pphY2Krt4dAsQMnHjV_VR3AhvSZLdBPj"
-TELEGRAM_TOKEN = "7569824254:AAGl7qmYJqWMRIkkqCwmDt6XnO59FEalJOw"
-TELEGRAM_CHAT_ID = "7866545451"
 
 MARKET_TZ = ZoneInfo("America/New_York")
 

@@ -469,10 +469,20 @@ class StockTechnicalBase:
 
     def detect_late_breakout(self, direction, tech):
         price = tech["price"]
+        regime = self.get_market_regime()
+        extension_multiplier = 1.0
+        if ENABLE_REGIME_SCORING:
+            if regime == "CHOP":
+                extension_multiplier = CHOP_EXTENSION_MULTIPLIER
+            elif regime == "TREND":
+                extension_multiplier = TREND_EXTENSION_MULTIPLIER
+
+        vwap_limit = MAX_EXTENSION_FROM_VWAP_PCT * extension_multiplier
+        orb_limit = MAX_EXTENSION_FROM_ORB_PCT * extension_multiplier
         vwap_ext = abs(pct_diff(price, tech.get("vwap"))) if tech.get("vwap") else 0
 
-        if vwap_ext > MAX_EXTENSION_FROM_VWAP_PCT:
-            return True, f"price extended {vwap_ext:.2f}% from VWAP"
+        if vwap_ext > vwap_limit:
+            return True, f"price extended {vwap_ext:.2f}% from VWAP (limit {vwap_limit:.2f}%, {regime})"
 
         if direction == "CALL":
             levels = [tech.get("orb_high"), tech.get("premarket_high"), tech.get("prev_high")]
@@ -483,8 +493,8 @@ class StockTechnicalBase:
 
         extension = max([abs(pct_diff(price, x)) for x in levels if x] or [0])
 
-        if extension > MAX_EXTENSION_FROM_ORB_PCT:
-            return True, f"price extended {extension:.2f}% beyond {label} level"
+        if extension > orb_limit:
+            return True, f"price extended {extension:.2f}% beyond {label} level (limit {orb_limit:.2f}%, {regime})"
 
         return False, "not extended"
 
@@ -570,6 +580,31 @@ class StockTechnicalBase:
 
         return False
 
+    def microstructure_ok(self, direction, tech):
+        closes = tech.get("last_5_closes", [])
+        highs = tech.get("last_5_highs", [])
+        lows = tech.get("last_5_lows", [])
+        if len(closes) < 3 or len(highs) < 3 or len(lows) < 3:
+            return False, "insufficient recent candles"
+
+        c1, c2, c3 = closes[-3], closes[-2], closes[-1]
+        h3, l3 = highs[-1], lows[-1]
+        rng3 = max(h3 - l3, 1e-9)
+        body3 = abs(c3 - c2)
+        body_ratio = body3 / rng3
+
+        if direction == "CALL":
+            if not (c3 > c2 >= c1):
+                return False, "last 3 closes not stacking bullish"
+        else:
+            if not (c3 < c2 <= c1):
+                return False, "last 3 closes not stacking bearish"
+
+        if body_ratio < 0.35:
+            return False, "last candle body too small vs range"
+
+        return True, "microstructure confirms follow-through"
+
     def get_market_bias(self):
         now_ts = time.time()
 
@@ -648,6 +683,15 @@ class StockTechnicalBase:
         self.market_bias_cache_time = now_ts
 
         return result
+
+    def get_market_regime(self):
+        market = self.get_market_bias()
+        spread = abs(market["bullish_count"] - market["bearish_count"])
+        if spread >= 2:
+            return "TREND"
+        if market["bias"] == "NEUTRAL":
+            return "CHOP"
+        return "MIXED"
 
     def score_call_setup(self, tech):
         price = tech["price"]
@@ -750,6 +794,14 @@ class StockTechnicalBase:
             score += CONTINUATION_WEIGHT
             reasons.append("bullish continuation confirmed by last candles")
 
+        micro_ok, micro_reason = self.microstructure_ok("CALL", tech)
+        if micro_ok:
+            score += 6
+            reasons.append(micro_reason)
+        else:
+            score -= 8
+            reasons.append("microstructure weak: " + micro_reason)
+
         market = self.get_market_bias()
 
         if market["bias"] == "BULLISH":
@@ -759,17 +811,12 @@ class StockTechnicalBase:
         elif market["bias"] == "BEARISH":
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias against CALLs: " + ", ".join(market["details"]))
+            score -= MARKET_BIAS_CONFLICT_PENALTY
+            reasons.append("extra penalty: CALL against market bias")
 
         elif REQUIRE_MARKET_BIAS:
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias neutral, CALL deprioritized")
-
-        if self.call_above_pm_or_pd_high(tech):
-            score += A_PLUS_BREAKOUT_BONUS
-            reasons.append("A+ CALL condition met: price above premarket high or previous day high")
-        elif REQUIRE_PM_OR_PD_BREAK_FOR_A_PLUS:
-            score -= A_PLUS_BREAKOUT_PENALTY
-            reasons.append("A+ CALL blocked: price not above premarket high or previous day high")
 
         if self.call_above_pm_or_pd_high(tech):
             score += A_PLUS_BREAKOUT_BONUS
@@ -789,6 +836,10 @@ class StockTechnicalBase:
         elif REQUIRE_SECTOR_CONFIRMATION:
             score -= SECTOR_ETF_WEIGHT
             reasons.append("sector ETF confirmation missing")
+
+        if ENABLE_REGIME_SCORING and self.get_market_regime() == "CHOP":
+            score -= CHOP_MIN_SCORE_BONUS
+            reasons.append("chop regime: stricter CALL scoring")
                         
         return {
             "direction": "CALL",
@@ -900,6 +951,14 @@ class StockTechnicalBase:
             score += CONTINUATION_WEIGHT
             reasons.append("bearish continuation confirmed by last candles")
 
+        micro_ok, micro_reason = self.microstructure_ok("PUT", tech)
+        if micro_ok:
+            score += 6
+            reasons.append(micro_reason)
+        else:
+            score -= 8
+            reasons.append("microstructure weak: " + micro_reason)
+
         market = self.get_market_bias()
 
         if market["bias"] == "BEARISH":
@@ -909,17 +968,12 @@ class StockTechnicalBase:
         elif market["bias"] == "BULLISH":
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias against PUTs: " + ", ".join(market["details"]))
+            score -= MARKET_BIAS_CONFLICT_PENALTY
+            reasons.append("extra penalty: PUT against market bias")
 
         elif REQUIRE_MARKET_BIAS:
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias neutral, PUT deprioritized")
-
-        if self.put_below_pm_or_pd_low(tech):
-            score += A_PLUS_BREAKOUT_BONUS
-            reasons.append("A+ PUT condition met: price below premarket low or previous day low")
-        elif REQUIRE_PM_OR_PD_BREAK_FOR_A_PLUS:
-            score -= A_PLUS_BREAKOUT_PENALTY
-            reasons.append("A+ PUT blocked: price not below premarket low or previous day low")
 
         if self.put_below_pm_or_pd_low(tech):
             score += A_PLUS_BREAKOUT_BONUS
@@ -939,6 +993,10 @@ class StockTechnicalBase:
         elif REQUIRE_SECTOR_CONFIRMATION:
             score -= SECTOR_ETF_WEIGHT
             reasons.append("sector ETF confirmation missing")
+
+        if ENABLE_REGIME_SCORING and self.get_market_regime() == "CHOP":
+            score -= CHOP_MIN_SCORE_BONUS
+            reasons.append("chop regime: stricter PUT scoring")
                         
         return {
             "direction": "PUT",

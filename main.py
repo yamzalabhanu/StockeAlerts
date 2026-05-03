@@ -1,3 +1,5 @@
+import time
+
 from market_data import get_stock_data, compute_indicators
 from analyzer import analyze_stock
 from ai_analyst import ai_decision
@@ -9,7 +11,10 @@ from storage import save_result
 from options_engine import select_option_contract, option_to_dict, format_option_alert
 from loss_analyzer import should_skip_from_loss_history
 from pre_trade_ai import pre_trade_filter
-import time
+from intraday_confirm import intraday_confirmation
+from mtf_confirm import mtf_confirmation
+from smc_confirm import smc_confirmation
+
 
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
@@ -21,6 +26,9 @@ WATCHLIST = [
     "JPM", "GS", "BAC",
     "MRNA", "REGN", "VRTX",
 ]
+
+SCAN_INTERVAL_SECONDS = 300
+
 
 while True:
     print("\n===== NEW SCAN =====")
@@ -41,7 +49,10 @@ while True:
                 print("Skipped: cooldown active")
                 continue
 
-            allowed, market_reason = market_allows_setup(analysis["signal"], market["bias"])
+            allowed, market_reason = market_allows_setup(
+                analysis["signal"],
+                market["bias"],
+            )
             if not allowed:
                 print("Skipped market filter:", market_reason)
                 continue
@@ -51,13 +62,37 @@ while True:
                 print("Skipped sector filter:", sector_reason)
                 continue
 
-            if not analysis["a_plus"]:
-                print("Skipped: not A+ setup")
+            if not (analysis.get("a_plus") or analysis.get("early_a_plus")):
+                print("Skipped: not A+ or early setup")
                 continue
 
-            skip_loss, loss_reason = should_skip_from_loss_history(symbol, analysis["signal"])
+            skip_loss, loss_reason = should_skip_from_loss_history(
+                symbol,
+                analysis["signal"],
+            )
             if skip_loss:
                 print("Skipped loss-history filter:", loss_reason)
+                continue
+
+            intraday_ok, intraday_info = intraday_confirmation(symbol, analysis)
+            print("Intraday:", intraday_info)
+
+            if not intraday_ok:
+                print("Skipped intraday confirmation")
+                continue
+
+            mtf_ok, mtf_info = mtf_confirmation(symbol, analysis, strict=True)
+            print("MTF:", mtf_info)
+
+            if not mtf_ok:
+                print("Skipped MTF confirmation")
+                continue
+
+            smc_ok, smc_info = smc_confirmation(symbol, analysis)
+            print("SMC:", smc_info)
+
+            if not smc_ok:
+                print("Skipped SMC confirmation")
                 continue
 
             option_candidate = select_option_contract(symbol, analysis)
@@ -66,6 +101,7 @@ while True:
 
             final_gate = pre_trade_filter(symbol, analysis, option_dict)
             print("Pre-trade AI:", final_gate)
+
             if "REJECT" in final_gate.upper():
                 print("Skipped: pre-trade AI rejected setup")
                 continue
@@ -82,6 +118,9 @@ while True:
                 "score": analysis["score"],
                 "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
                 "option": option_dict,
+                "intraday": intraday_info,
+                "mtf": mtf_info,
+                "smc": smc_info,
                 "pre_trade_ai": final_gate,
                 "ai_decision": ai_output,
             }
@@ -94,6 +133,9 @@ while True:
                 f"Entry: {analysis['entry']}\n"
                 f"Price: {analysis['price']}\n"
                 f"Score: {analysis['score']}\n\n"
+                f"Intraday: {intraday_info}\n\n"
+                f"MTF: passed {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
+                f"SMC Score: {smc_info.get('score')}\n\n"
                 f"{option_text}\n\n"
                 f"Pre-Trade AI:\n{final_gate}\n\n"
                 f"AI:\n{ai_output}"
@@ -106,4 +148,4 @@ while True:
         except Exception as e:
             print(f"Error {symbol}: {e}")
 
-    time.sleep(300)
+    time.sleep(SCAN_INTERVAL_SECONDS)

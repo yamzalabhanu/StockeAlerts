@@ -113,7 +113,7 @@ MAX_ALERTS_PER_SCAN = 5
 # Quality trading windows ET
 QUALITY_WINDOWS = [
     ("09:30", "12:30"),
-    ("13:30", "15:30"),
+    ("13:30", "18:30"),
 ]
 
 # Sector ETF confirmation is a scoring input, not a hard blocker.

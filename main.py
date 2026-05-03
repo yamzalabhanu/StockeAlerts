@@ -1,3 +1,4 @@
+# UPDATED VERSION (relaxed filters)
 import time
 
 from market_data import get_stock_data, compute_indicators
@@ -15,77 +16,41 @@ from intraday_confirm import intraday_confirmation
 from mtf_confirm import mtf_confirmation
 from smc_confirm import smc_confirmation
 
-
 MAX_ALERTS_PER_SCAN = 5
 SCAN_INTERVAL_SECONDS = 300
 
-WATCHLIST = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
-    "AMD", "NFLX", "SHOP", "COIN", "ROKU", "PLTR",
-
-    # AI / Data Center Infra
-    "SMH", "AVGO", "ASML", "LRCX", "KLAC", "ANET", "DELL", "HPE", "SMCI", "ARM",
-
-    # Memory / Storage
-    "MU", "WDC", "STX", "SKYY", "UMC",
-
-    # Semiconductor Supply Chain
-    "AMAT", "TER", "ONTO", "IPGP",
-
-    # Energy / Nuclear / Uranium
-    "XOM", "CVX", "SLB", "HAL", "URA", "CCJ", "BWXT", "LEU",
-    "SMR", "OKLO", "UEC", "NXE",
-
-    # Quantum
-    "IONQ", "QBTS", "RGTI",
-
-    # Cloud / Software Infra
-    "CRM", "SNOW", "MDB", "DDOG", "NET", "ZS",
-
-    # EV / Future Mobility
-    "RIVN", "LCID", "NIO",
-
-    # Financials
-    "JPM", "GS", "BAC",
-
-    # Biotech
-    "MRNA", "REGN", "VRTX",
-
-    # ETFs
-    "SPY", "QQQ", "IWM", "XLF", "XLE", "XLK",
+WATCHLIST = WATCHLIST = [
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AMD","NFLX","SHOP","COIN","ROKU","PLTR",
+    "SMH","AVGO","ASML","LRCX","KLAC","ANET","DELL","HPE","SMCI","ARM",
+    "MU","WDC","STX","SKYY","UMC",
+    "AMAT","TER","ONTO","IPGP",
+    "XOM","CVX","SLB","HAL","URA","CCJ","BWXT","LEU","SMR","OKLO","UEC","NXE",
+    "IONQ","QBTS","RGTI",
+    "CRM","SNOW","MDB","DDOG","NET","ZS",
+    "RIVN","LCID","NIO",
+    "JPM","GS","BAC",
+    "MRNA","REGN","VRTX",
+    "SPY","QQQ","IWM","XLF","XLE","XLK",
 ]
 
 
 def setup_rank_score(analysis, mtf_info, smc_info, intraday_info):
-    tier_bonus = {
-        "A+": 30,
-        "Early A+": 20,
-        "B+": 10,
-    }.get(analysis.get("tier"), 0)
+    score = int(analysis.get("score", 0))
 
-    mtf_bonus = int(mtf_info.get("passed", 0)) * 5
-    smc_bonus = int(smc_info.get("score", 0))
+    # Bonuses instead of hard filters
+    if analysis.get("tier") == "B+":
+        score += 10
 
-    intraday_bonus = 0
+    if mtf_info.get("approved"):
+        score += 10
+
+    # SMC now bonus only
+    score += int(smc_info.get("score", 0))
+
     if intraday_info.get("approved"):
-        intraday_bonus += 15
-    if intraday_info.get("rel_volume_5m", 0) >= 1.5:
-        intraday_bonus += 10
-    if intraday_info.get("body_pct", 0) >= 0.45:
-        intraday_bonus += 5
+        score += 15
 
-    late_penalty = 50 if analysis.get("late_entry") else 0
-    extension_penalty = float(analysis.get("extended_pct", 0)) * 10
-
-    return (
-        int(analysis.get("score", 0))
-        + tier_bonus
-        + mtf_bonus
-        + smc_bonus
-        + intraday_bonus
-        - late_penalty
-        - extension_penalty
-    )
+    return score
 
 
 while True:
@@ -106,7 +71,6 @@ while True:
             print("Analysis:", analysis)
 
             if is_in_cooldown(symbol, analysis["signal"]):
-                print("Skipped: cooldown active")
                 continue
 
             allowed, market_reason = market_allows_setup(
@@ -117,44 +81,22 @@ while True:
                 print("Skipped market filter:", market_reason)
                 continue
 
-            sector_ok, sector_reason = sector_confirm(symbol)
-            if not sector_ok:
-                print("Skipped sector filter:", sector_reason)
-                continue
-
-            if not (
-                analysis.get("a_plus")
-                or analysis.get("early_a_plus")
-                or analysis.get("b_plus")
-            ):
-                print("Skipped: below B+ threshold")
-                continue
-
-            skip_loss, loss_reason = should_skip_from_loss_history(
-                symbol,
-                analysis["signal"],
-            )
-            if skip_loss:
-                print("Skipped loss-history filter:", loss_reason)
+            # 🔥 RELAXED THRESHOLD (was strict B+ only)
+            if analysis.get("score", 0) < 60:
+                print("Skipped: below relaxed threshold (60)")
                 continue
 
             intraday_ok, intraday_info = intraday_confirmation(symbol, analysis)
             print("Intraday:", intraday_info)
             if not intraday_ok:
-                print("Skipped intraday confirmation")
                 continue
 
-            mtf_ok, mtf_info = mtf_confirmation(symbol, analysis, strict=True)
+            mtf_ok, mtf_info = mtf_confirmation(symbol, analysis, strict=False)
             print("MTF:", mtf_info)
-            if not mtf_ok:
-                print("Skipped MTF confirmation")
-                continue
 
             smc_ok, smc_info = smc_confirmation(symbol, analysis)
             print("SMC:", smc_info)
-            if not smc_ok:
-                print("Skipped SMC confirmation")
-                continue
+            # 🔥 NO MORE BLOCKING
 
             rank_score = setup_rank_score(
                 analysis,
@@ -200,49 +142,18 @@ while True:
             option_dict = option_to_dict(option_candidate)
             option_text = format_option_alert(option_candidate)
 
-            final_gate = pre_trade_filter(symbol, analysis, option_dict)
-            print(f"Pre-trade AI for {symbol}:", final_gate)
-
-            if "REJECT" in final_gate.upper():
-                print(f"Skipped {symbol}: pre-trade AI rejected setup")
-                continue
-
             ai_output = ai_decision(symbol, analysis)
 
-            trade = {
-                "symbol": symbol,
-                "signal": analysis["signal"],
-                "price": analysis["price"],
-                "entry": analysis["entry"],
-                "score": analysis["score"],
-                "rank_score": round(rank_score, 2),
-                "tier": analysis.get("tier"),
-                "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
-                "option": option_dict,
-                "intraday": intraday_info,
-                "mtf": mtf_info,
-                "smc": smc_info,
-                "pre_trade_ai": final_gate,
-                "ai_decision": ai_output,
-            }
-
-            save_result(trade)
-
             message = (
-                f"🚀 {symbol} {analysis.get('tier')} Setup\n"
+                f"🚀 {symbol} Setup\n"
                 f"Rank Score: {round(rank_score, 2)}\n"
                 f"Signal: {analysis['signal']}\n"
-                f"Entry: {analysis['entry']}\n"
                 f"Price: {analysis['price']}\n"
                 f"Score: {analysis['score']}\n\n"
-                f"Intraday: approved={intraday_info.get('approved')} | "
-                f"5m RelVol={intraday_info.get('rel_volume_5m')} | "
-                f"Body={intraday_info.get('body_pct')}\n"
-                f"MTF: {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
-                f"SMC Score: {smc_info.get('score')}\n\n"
-                f"{option_text}\n\n"
-                f"Pre-Trade AI:\n{final_gate}\n\n"
-                f"AI:\n{ai_output}"
+                f"Intraday: {intraday_info.get('confirmations')}/{intraday_info.get('required_confirmations')}\n"
+                f"MTF Passed: {mtf_info.get('passed')}\n"
+                f"SMC Score: {smc_info.get('score')}\n"
+                f"{option_text}"
             )
 
             print(message)
@@ -250,6 +161,6 @@ while True:
             update_cooldown(symbol, analysis["signal"])
 
         except Exception as e:
-            print(f"Error processing top candidate {symbol}: {e}")
+            print(f"Error processing {symbol}: {e}")
 
     time.sleep(SCAN_INTERVAL_SECONDS)

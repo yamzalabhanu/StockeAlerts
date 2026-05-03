@@ -28,17 +28,31 @@ def get_market_bias(symbol: str = "SPY") -> dict:
 
 
 def market_allows_setup(stock_signal: str, market_bias: str) -> tuple[bool, str]:
-    """Avoid taking stock setups against the broad-market direction."""
-    long_signals = {"BULLISH BREAKOUT", "UPTREND"}
-    weak_signals = {"BEARISH BREAKDOWN", "DOWNTREND"}
+    """Avoid true counter-trend trades, but do not block neutral/watchlist setups.
 
-    if market_bias == "BULLISH" and stock_signal in long_signals:
-        return True, "SPY bias supports bullish setup"
+    Previous logic rejected SIDEWAYS / EARLY WATCH signals during a bullish SPY regime,
+    which removed many valid watch/retest setups. This filter now only blocks clear
+    bearish setups in a bullish tape and clear bullish setups in a bearish tape.
+    """
+    signal = (stock_signal or "").upper()
 
-    if market_bias == "BEARISH" and stock_signal in weak_signals:
-        return True, "SPY bias supports bearish setup"
+    bullish_signal = any(token in signal for token in ["BULLISH", "UPTREND"])
+    bearish_signal = any(token in signal for token in ["BEARISH", "DOWNTREND", "BREAKDOWN"])
+    neutral_signal = any(token in signal for token in ["SIDEWAYS", "WATCH"])
+
+    if market_bias == "BULLISH":
+        if bearish_signal:
+            return False, f"SPY bias {market_bias} conflicts with bearish stock signal {stock_signal}"
+        return True, "SPY bullish; allowing bullish/neutral/early-watch setup"
+
+    if market_bias == "BEARISH":
+        if bullish_signal:
+            return False, f"SPY bias {market_bias} conflicts with bullish stock signal {stock_signal}"
+        return True, "SPY bearish; allowing bearish/neutral setup"
 
     if market_bias == "NEUTRAL":
-        return False, "SPY is neutral/choppy; wait for stronger market direction"
+        if neutral_signal:
+            return False, "SPY is neutral/choppy and stock setup is also neutral"
+        return True, "SPY neutral; allowing directional stock setup with other confirmations"
 
-    return False, f"SPY bias {market_bias} conflicts with stock signal {stock_signal}"
+    return True, "Market filter passed"

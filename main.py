@@ -9,6 +9,9 @@ from storage import save_result
 from options_engine import select_option_contract, option_to_dict, format_option_alert
 from loss_analyzer import should_skip_from_loss_history
 from pre_trade_ai import pre_trade_filter
+from intraday_confirm import intraday_confirmation
+from mtf_confirm import mtf_confirmation
+from smc_confirm import smc_confirmation
 import time
 
 WATCHLIST = [
@@ -51,13 +54,39 @@ while True:
                 print("Skipped sector filter:", sector_reason)
                 continue
 
-            if not analysis["a_plus"]:
-                print("Skipped: not A+ setup")
+            # 🔥 UPDATED FILTER (A+ OR EARLY OR B+)
+            if not (
+                analysis.get("a_plus") or
+                analysis.get("early_a_plus") or
+                analysis.get("b_plus")
+            ):
+                print("Skipped: below B+ threshold")
                 continue
 
             skip_loss, loss_reason = should_skip_from_loss_history(symbol, analysis["signal"])
             if skip_loss:
                 print("Skipped loss-history filter:", loss_reason)
+                continue
+
+            intraday_ok, intraday_info = intraday_confirmation(symbol, analysis)
+            print("Intraday:", intraday_info)
+
+            if not intraday_ok:
+                print("Skipped intraday confirmation")
+                continue
+
+            mtf_ok, mtf_info = mtf_confirmation(symbol, analysis, strict=True)
+            print("MTF:", mtf_info)
+
+            if not mtf_ok:
+                print("Skipped MTF confirmation")
+                continue
+
+            smc_ok, smc_info = smc_confirmation(symbol, analysis)
+            print("SMC:", smc_info)
+
+            if not smc_ok:
+                print("Skipped SMC confirmation")
                 continue
 
             option_candidate = select_option_contract(symbol, analysis)
@@ -66,6 +95,7 @@ while True:
 
             final_gate = pre_trade_filter(symbol, analysis, option_dict)
             print("Pre-trade AI:", final_gate)
+
             if "REJECT" in final_gate.upper():
                 print("Skipped: pre-trade AI rejected setup")
                 continue
@@ -77,11 +107,13 @@ while True:
                 "signal": analysis["signal"],
                 "price": analysis["price"],
                 "entry": analysis["entry"],
-                "stop": analysis.get("stop"),
-                "target": analysis.get("target"),
                 "score": analysis["score"],
+                "tier": analysis.get("tier"),
                 "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
                 "option": option_dict,
+                "intraday": intraday_info,
+                "mtf": mtf_info,
+                "smc": smc_info,
                 "pre_trade_ai": final_gate,
                 "ai_decision": ai_output,
             }
@@ -89,13 +121,14 @@ while True:
             save_result(trade)
 
             message = (
-                f"🚀 {symbol} A+ Setup\n"
+                f"🚀 {symbol} {analysis.get('tier')} Setup\n"
                 f"Signal: {analysis['signal']}\n"
                 f"Entry: {analysis['entry']}\n"
                 f"Price: {analysis['price']}\n"
                 f"Score: {analysis['score']}\n\n"
+                f"MTF: {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
+                f"SMC Score: {smc_info.get('score')}\n\n"
                 f"{option_text}\n\n"
-                f"Pre-Trade AI:\n{final_gate}\n\n"
                 f"AI:\n{ai_output}"
             )
 

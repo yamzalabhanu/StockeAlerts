@@ -1,3 +1,5 @@
+import time
+
 from market_data import get_stock_data, compute_indicators
 from analyzer import analyze_stock
 from ai_analyst import ai_decision
@@ -12,7 +14,7 @@ from pre_trade_ai import pre_trade_filter
 from intraday_confirm import intraday_confirmation
 from mtf_confirm import mtf_confirmation
 from smc_confirm import smc_confirmation
-import time
+
 
 MAX_ALERTS_PER_SCAN = 5
 SCAN_INTERVAL_SECONDS = 300
@@ -20,17 +22,41 @@ SCAN_INTERVAL_SECONDS = 300
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
     "AMD", "NFLX", "SHOP", "COIN", "ROKU", "PLTR",
-    "SMH", "MU", "AVGO", "LRCX", "KLAC", "ASML",
+
+    # AI / Data Center Infra
+    "SMH", "AVGO", "ASML", "LRCX", "KLAC", "ANET", "DELL", "HPE", "SMCI", "ARM",
+
+    # Memory / Storage
+    "MU", "WDC", "STX", "SKYY", "UMC",
+
+    # Semiconductor Supply Chain
+    "AMAT", "TER", "ONTO", "IPGP",
+
+    # Energy / Nuclear / Uranium
+    "XOM", "CVX", "SLB", "HAL", "URA", "CCJ", "BWXT", "LEU",
+    "SMR", "OKLO", "UEC", "NXE",
+
+    # Quantum
+    "IONQ", "QBTS", "RGTI",
+
+    # Cloud / Software Infra
+    "CRM", "SNOW", "MDB", "DDOG", "NET", "ZS",
+
+    # EV / Future Mobility
     "RIVN", "LCID", "NIO",
-    "SPY", "QQQ", "IWM", "XLF", "XLE",
-    "XOM", "CVX", "SLB",
+
+    # Financials
     "JPM", "GS", "BAC",
+
+    # Biotech
     "MRNA", "REGN", "VRTX",
+
+    # ETFs
+    "SPY", "QQQ", "IWM", "XLF", "XLE", "XLK",
 ]
 
 
 def setup_rank_score(analysis, mtf_info, smc_info, intraday_info):
-    """Rank candidates so only the best setups alert per scan."""
     tier_bonus = {
         "A+": 30,
         "Early A+": 20,
@@ -39,8 +65,8 @@ def setup_rank_score(analysis, mtf_info, smc_info, intraday_info):
 
     mtf_bonus = int(mtf_info.get("passed", 0)) * 5
     smc_bonus = int(smc_info.get("score", 0))
-    intraday_bonus = 0
 
+    intraday_bonus = 0
     if intraday_info.get("approved"):
         intraday_bonus += 15
     if intraday_info.get("rel_volume_5m", 0) >= 1.5:
@@ -83,7 +109,10 @@ while True:
                 print("Skipped: cooldown active")
                 continue
 
-            allowed, market_reason = market_allows_setup(analysis["signal"], market["bias"])
+            allowed, market_reason = market_allows_setup(
+                analysis["signal"],
+                market["bias"],
+            )
             if not allowed:
                 print("Skipped market filter:", market_reason)
                 continue
@@ -94,14 +123,17 @@ while True:
                 continue
 
             if not (
-                analysis.get("a_plus") or
-                analysis.get("early_a_plus") or
-                analysis.get("b_plus")
+                analysis.get("a_plus")
+                or analysis.get("early_a_plus")
+                or analysis.get("b_plus")
             ):
                 print("Skipped: below B+ threshold")
                 continue
 
-            skip_loss, loss_reason = should_skip_from_loss_history(symbol, analysis["signal"])
+            skip_loss, loss_reason = should_skip_from_loss_history(
+                symbol,
+                analysis["signal"],
+            )
             if skip_loss:
                 print("Skipped loss-history filter:", loss_reason)
                 continue
@@ -124,7 +156,13 @@ while True:
                 print("Skipped SMC confirmation")
                 continue
 
-            rank_score = setup_rank_score(analysis, mtf_info, smc_info, intraday_info)
+            rank_score = setup_rank_score(
+                analysis,
+                mtf_info,
+                smc_info,
+                intraday_info,
+            )
+
             candidates.append({
                 "symbol": symbol,
                 "analysis": analysis,
@@ -133,12 +171,18 @@ while True:
                 "smc": smc_info,
                 "rank_score": rank_score,
             })
-            print(f"Candidate added: rank_score={rank_score}")
+
+            print(f"Candidate added: rank_score={round(rank_score, 2)}")
 
         except Exception as e:
             print(f"Error {symbol}: {e}")
 
-    candidates = sorted(candidates, key=lambda x: x["rank_score"], reverse=True)
+    candidates = sorted(
+        candidates,
+        key=lambda x: x["rank_score"],
+        reverse=True,
+    )
+
     top_candidates = candidates[:MAX_ALERTS_PER_SCAN]
 
     print(f"\nTop candidates this scan: {[c['symbol'] for c in top_candidates]}")
@@ -158,6 +202,7 @@ while True:
 
             final_gate = pre_trade_filter(symbol, analysis, option_dict)
             print(f"Pre-trade AI for {symbol}:", final_gate)
+
             if "REJECT" in final_gate.upper():
                 print(f"Skipped {symbol}: pre-trade AI rejected setup")
                 continue
@@ -170,7 +215,7 @@ while True:
                 "price": analysis["price"],
                 "entry": analysis["entry"],
                 "score": analysis["score"],
-                "rank_score": rank_score,
+                "rank_score": round(rank_score, 2),
                 "tier": analysis.get("tier"),
                 "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
                 "option": option_dict,
@@ -190,10 +235,13 @@ while True:
                 f"Entry: {analysis['entry']}\n"
                 f"Price: {analysis['price']}\n"
                 f"Score: {analysis['score']}\n\n"
+                f"Intraday: approved={intraday_info.get('approved')} | "
+                f"5m RelVol={intraday_info.get('rel_volume_5m')} | "
+                f"Body={intraday_info.get('body_pct')}\n"
                 f"MTF: {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
-                f"SMC Score: {smc_info.get('score')}\n"
-                f"5m RelVol: {intraday_info.get('rel_volume_5m')}\n\n"
+                f"SMC Score: {smc_info.get('score')}\n\n"
                 f"{option_text}\n\n"
+                f"Pre-Trade AI:\n{final_gate}\n\n"
                 f"AI:\n{ai_output}"
             )
 

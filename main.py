@@ -12,30 +12,6 @@ from pre_trade_ai import pre_trade_filter
 import time
 
 WATCHLIST = [
-    # 🔥 Mega Cap Momentum
-    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
-
-    # ⚡ High Beta / Movers
-    "AMD","NFLX","SHOP","COIN","ROKU","PLTR",
-
-    # 🧠 AI / Semiconductor Leaders
-    "SMH","MU","AVGO","LRCX","KLAC","ASML",
-
-    # 🚗 EV / Growth
-    "RIVN","LCID","NIO",
-
-    # 📊 ETFs (Market + Sector)
-    "SPY","QQQ","IWM","SMH","XLF","XLE",
-
-    # 🛢️ Energy / Commodities Momentum
-    "XOM","CVX","SLB",
-
-    # 🏦 Financial Movers
-    "JPM","GS","BAC",
-
-    # 🧪 Biotech (volatile movers)
-    "MRNA","REGN","VRTX"
-
     "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
     "AMD", "NFLX", "SHOP", "COIN", "ROKU", "PLTR",
     "SMH", "MU", "AVGO", "LRCX", "KLAC", "ASML",

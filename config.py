@@ -4,7 +4,7 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
-
+    
 
 MARKET_TZ = ZoneInfo("America/New_York")
 

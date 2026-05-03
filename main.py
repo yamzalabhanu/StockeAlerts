@@ -3,6 +3,8 @@ from analyzer import analyze_stock
 from ai_analyst import ai_decision
 from market_filter import get_market_bias, market_allows_setup
 from telegram_alert import send_telegram
+from cooldown import is_in_cooldown, update_cooldown
+from sector_filter import sector_confirm
 import time
 
 WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]
@@ -19,9 +21,15 @@ while True:
             df = compute_indicators(df)
             analysis = analyze_stock(df)
 
-            allowed, reason = market_allows_setup(analysis["signal"], market["bias"])
+            if is_in_cooldown(symbol, analysis["signal"]):
+                continue
 
+            allowed, reason = market_allows_setup(analysis["signal"], market["bias"])
             if not allowed:
+                continue
+
+            sector_ok, sector_reason = sector_confirm(symbol)
+            if not sector_ok:
                 continue
 
             if not analysis["a_plus"]:
@@ -43,6 +51,7 @@ AI:
 
             print(message)
             send_telegram(message)
+            update_cooldown(symbol, analysis["signal"])
 
         except Exception as e:
             print(f"Error {symbol}: {e}")

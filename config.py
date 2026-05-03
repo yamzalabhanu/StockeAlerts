@@ -4,11 +4,8 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
-    
-OPENAI_API_KEY= "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"
-POLYGON_API_KEY= "pphY2Krt4dAsQMnHjV_VR3AhvSZLdBPj"
-TELEGRAM_TOKEN= "7569824254:AAGl7qmYJqWMRIkkqCwmDt6XnO59FEalJOw"
-TELEGRAM_CHAT_ID= "7866545451"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MARKET_TZ = ZoneInfo("America/New_York")
 

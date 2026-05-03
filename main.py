@@ -16,53 +16,76 @@ from mtf_confirm import mtf_confirmation
 from smc_confirm import smc_confirmation
 
 
+MAX_ALERTS_PER_SCAN = 5
+SCAN_INTERVAL_SECONDS = 300
+
 WATCHLIST = [
-    # 🔥 Mega Cap Leaders
-    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
+    "AMD", "NFLX", "SHOP", "COIN", "ROKU", "PLTR",
 
-    # ⚡ High Beta / Momentum
-    "AMD","NFLX","SHOP","COIN","ROKU","PLTR",
+    # AI / Data Center Infra
+    "SMH", "AVGO", "ASML", "LRCX", "KLAC", "ANET", "DELL", "HPE", "SMCI", "ARM",
 
-    # 🧠 AI / Data Center Infra
-    "NVDA","SMH","AVGO","ASML","LRCX","KLAC",
-    "ANET","DELL","HPE","SUPM","ARM",
+    # Memory / Storage
+    "MU", "WDC", "STX", "SKYY", "UMC",
 
-    # 💾 Memory / Storage (CYCLICAL MOMENTUM)
-    "MU","WDC","STX","SKYY","UMC",
+    # Semiconductor Supply Chain
+    "AMAT", "TER", "ONTO", "IPGP",
 
-    # ⚡ Semiconductor Supply Chain
-    "AMAT","TER","ONTO","IPGP",
+    # Energy / Nuclear / Uranium
+    "XOM", "CVX", "SLB", "HAL", "URA", "CCJ", "BWXT", "LEU",
+    "SMR", "OKLO", "UEC", "NXE",
 
-    # 🔋 Energy + Nuclear Theme
-    "XOM","CVX","SLB","HAL",
-    "URA","CCJ","BWXT","LEU",
+    # Quantum
+    "IONQ", "QBTS", "RGTI",
 
-    # ⚛️ Nuclear / Uranium (HIGH MOMENTUM)
-    "SMR","OKLO","UEC","NXE",
+    # Cloud / Software Infra
+    "CRM", "SNOW", "MDB", "DDOG", "NET", "ZS",
 
-    # 🧬 Quantum / Next-Gen Compute
-    "IONQ","QBTS","RGTI",
+    # EV / Future Mobility
+    "RIVN", "LCID", "NIO",
 
-    # ☁️ Cloud / Software Infra
-    "CRM","SNOW","MDB","DDOG","NET","ZS",
+    # Financials
+    "JPM", "GS", "BAC",
 
-    # 📡 Networking / Infra
-    "CSCO","JNPR","EXTR",
+    # Biotech
+    "MRNA", "REGN", "VRTX",
 
-    # 🚗 EV + Future Mobility
-    "RIVN","LCID","NIO",
-
-    # 🏦 Financials (Momentum Rotation)
-    "JPM","GS","BAC",
-
-    # 🧪 Biotech Movers
-    "MRNA","REGN","VRTX",
-
-    # 📊 ETFs (Market + Sector Bias)
-    "SPY","QQQ","IWM","XLF","XLE","SMH","XLK"
+    # ETFs
+    "SPY", "QQQ", "IWM", "XLF", "XLE", "XLK",
 ]
 
-SCAN_INTERVAL_SECONDS = 300
+
+def setup_rank_score(analysis, mtf_info, smc_info, intraday_info):
+    tier_bonus = {
+        "A+": 30,
+        "Early A+": 20,
+        "B+": 10,
+    }.get(analysis.get("tier"), 0)
+
+    mtf_bonus = int(mtf_info.get("passed", 0)) * 5
+    smc_bonus = int(smc_info.get("score", 0))
+
+    intraday_bonus = 0
+    if intraday_info.get("approved"):
+        intraday_bonus += 15
+    if intraday_info.get("rel_volume_5m", 0) >= 1.5:
+        intraday_bonus += 10
+    if intraday_info.get("body_pct", 0) >= 0.45:
+        intraday_bonus += 5
+
+    late_penalty = 50 if analysis.get("late_entry") else 0
+    extension_penalty = float(analysis.get("extended_pct", 0)) * 10
+
+    return (
+        int(analysis.get("score", 0))
+        + tier_bonus
+        + mtf_bonus
+        + smc_bonus
+        + intraday_bonus
+        - late_penalty
+        - extension_penalty
+    )
 
 
 while True:
@@ -70,6 +93,8 @@ while True:
 
     market = get_market_bias()
     print("Market:", market)
+
+    candidates = []
 
     for symbol in WATCHLIST:
         try:
@@ -97,8 +122,12 @@ while True:
                 print("Skipped sector filter:", sector_reason)
                 continue
 
-            if not (analysis.get("a_plus") or analysis.get("early_a_plus")):
-                print("Skipped: not A+ or early setup")
+            if not (
+                analysis.get("a_plus")
+                or analysis.get("early_a_plus")
+                or analysis.get("b_plus")
+            ):
+                print("Skipped: below B+ threshold")
                 continue
 
             skip_loss, loss_reason = should_skip_from_loss_history(
@@ -111,34 +140,71 @@ while True:
 
             intraday_ok, intraday_info = intraday_confirmation(symbol, analysis)
             print("Intraday:", intraday_info)
-
             if not intraday_ok:
                 print("Skipped intraday confirmation")
                 continue
 
             mtf_ok, mtf_info = mtf_confirmation(symbol, analysis, strict=True)
             print("MTF:", mtf_info)
-
             if not mtf_ok:
                 print("Skipped MTF confirmation")
                 continue
 
             smc_ok, smc_info = smc_confirmation(symbol, analysis)
             print("SMC:", smc_info)
-
             if not smc_ok:
                 print("Skipped SMC confirmation")
                 continue
 
+            rank_score = setup_rank_score(
+                analysis,
+                mtf_info,
+                smc_info,
+                intraday_info,
+            )
+
+            candidates.append({
+                "symbol": symbol,
+                "analysis": analysis,
+                "intraday": intraday_info,
+                "mtf": mtf_info,
+                "smc": smc_info,
+                "rank_score": rank_score,
+            })
+
+            print(f"Candidate added: rank_score={round(rank_score, 2)}")
+
+        except Exception as e:
+            print(f"Error {symbol}: {e}")
+
+    candidates = sorted(
+        candidates,
+        key=lambda x: x["rank_score"],
+        reverse=True,
+    )
+
+    top_candidates = candidates[:MAX_ALERTS_PER_SCAN]
+
+    print(f"\nTop candidates this scan: {[c['symbol'] for c in top_candidates]}")
+
+    for candidate in top_candidates:
+        symbol = candidate["symbol"]
+        analysis = candidate["analysis"]
+        intraday_info = candidate["intraday"]
+        mtf_info = candidate["mtf"]
+        smc_info = candidate["smc"]
+        rank_score = candidate["rank_score"]
+
+        try:
             option_candidate = select_option_contract(symbol, analysis)
             option_dict = option_to_dict(option_candidate)
             option_text = format_option_alert(option_candidate)
 
             final_gate = pre_trade_filter(symbol, analysis, option_dict)
-            print("Pre-trade AI:", final_gate)
+            print(f"Pre-trade AI for {symbol}:", final_gate)
 
             if "REJECT" in final_gate.upper():
-                print("Skipped: pre-trade AI rejected setup")
+                print(f"Skipped {symbol}: pre-trade AI rejected setup")
                 continue
 
             ai_output = ai_decision(symbol, analysis)
@@ -148,9 +214,9 @@ while True:
                 "signal": analysis["signal"],
                 "price": analysis["price"],
                 "entry": analysis["entry"],
-                "stop": analysis.get("stop"),
-                "target": analysis.get("target"),
                 "score": analysis["score"],
+                "rank_score": round(rank_score, 2),
+                "tier": analysis.get("tier"),
                 "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
                 "option": option_dict,
                 "intraday": intraday_info,
@@ -163,13 +229,16 @@ while True:
             save_result(trade)
 
             message = (
-                f"🚀 {symbol} A+ Setup\n"
+                f"🚀 {symbol} {analysis.get('tier')} Setup\n"
+                f"Rank Score: {round(rank_score, 2)}\n"
                 f"Signal: {analysis['signal']}\n"
                 f"Entry: {analysis['entry']}\n"
                 f"Price: {analysis['price']}\n"
                 f"Score: {analysis['score']}\n\n"
-                f"Intraday: {intraday_info}\n\n"
-                f"MTF: passed {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
+                f"Intraday: approved={intraday_info.get('approved')} | "
+                f"5m RelVol={intraday_info.get('rel_volume_5m')} | "
+                f"Body={intraday_info.get('body_pct')}\n"
+                f"MTF: {mtf_info.get('passed')}/{mtf_info.get('required')}\n"
                 f"SMC Score: {smc_info.get('score')}\n\n"
                 f"{option_text}\n\n"
                 f"Pre-Trade AI:\n{final_gate}\n\n"
@@ -181,6 +250,6 @@ while True:
             update_cooldown(symbol, analysis["signal"])
 
         except Exception as e:
-            print(f"Error {symbol}: {e}")
+            print(f"Error processing top candidate {symbol}: {e}")
 
     time.sleep(SCAN_INTERVAL_SECONDS)

@@ -12,6 +12,7 @@ from bot_technical import StockTechnicalBase
 from bot_utils import fmt_price, extract_gpt_json, normalize_ai_response
 from outcome_tracker import track_outcome
 from chart_capture import capture_chart
+from intraday_confirm import intraday_confirmation
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -39,6 +40,7 @@ def log_alert(row: Dict[str, Any]):
             "premarket_high", "premarket_low",
             "prev_high", "prev_low",
             "current_volume", "avg_20_volume",
+            "intraday_confirmations", "intraday_required", "intraday_reason",
             "market_bias", "market_details",
             "reasons"
         ])
@@ -360,9 +362,9 @@ Return ONLY valid JSON:
         # Print only strong setups (>=100 score)
         if call["score"] >= 100 or put["score"] >= 100:
             print(
-		f"{ticker}: price={fmt_price(tech['price'])}, "
-		f"CALL={call['score']}, PUT={put['score']}, best={best['direction']}"
-	    )
+                f"{ticker}: price={fmt_price(tech['price'])}, "
+                f"CALL={call['score']}, PUT={put['score']}, best={best['direction']}"
+            )
 
         if best["score"] < min_score:
             return None
@@ -376,6 +378,18 @@ Return ONLY valid JSON:
 
         if best.get("late_breakout_risk"):
             print(f"{ticker}: skipped, late breakout risk - {best.get('late_reason')}")
+            return None
+
+        intraday_ok, intraday_info = intraday_confirmation(ticker, best)
+        print(
+            f"{ticker}: intraday={intraday_info.get('confirmations')}/"
+            f"{intraday_info.get('required_confirmations')} | "
+            f"approved={intraday_info.get('approved')} | "
+            f"reason={intraday_info.get('reason')}"
+        )
+
+        if not intraday_ok:
+            print(f"{ticker}: rejected by intraday - {intraday_info.get('reason')}")
             return None
 
         if best["score"] >= 90:
@@ -430,11 +444,18 @@ Return ONLY valid JSON:
         if best.get("retest_confirmed"):
             ranking_score += 10
 
+        if intraday_info.get("approved"):
+            ranking_score += 15
+
+        if intraday_info.get("confirmations", 0) >= 3:
+            ranking_score += 10
+
         return {
             "ticker": ticker,
             "setup": best,
             "tech": tech,
             "ai": ai,
+            "intraday": intraday_info,
             "ranking_score": ranking_score,
         }
 
@@ -451,11 +472,12 @@ Return ONLY valid JSON:
             print(f"{ticker}: error {e}")
             return None
 
-    def alert(self, ticker, setup, tech, ai, ranking_score=0):
+    def alert(self, ticker, setup, tech, ai, intraday_info=None, ranking_score=0):
         direction = setup["direction"]
         emoji = "🟢" if direction == "CALL" else "🔴"
         market = self.get_market_bias()
         alert_time = dt.datetime.now(dt.timezone.utc).isoformat()
+        intraday_info = intraday_info or {}
 
         msg = (
             f"{emoji} *A+ {direction} SETUP: {ticker}*\n"
@@ -466,7 +488,8 @@ Return ONLY valid JSON:
             f"🏅 *Rank Score:* {ranking_score:.1f}\n"
             f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%)\n"
             f"🏆 *Quality:* {ai['setup_quality']} | *Timing:* {ai['entry_timing']}\n"
-            f"🌎 *ETF Bias:* {market['bias']} ({market['bullish_count']} bull / {market['bearish_count']} bear)\n\n"
+            f"🌎 *ETF Bias:* {market['bias']} ({market['bullish_count']} bull / {market['bearish_count']} bear)\n"
+            f"📊 *Intraday:* {intraday_info.get('confirmations')}/{intraday_info.get('required_confirmations')} | {intraday_info.get('reason')}\n\n"
             f"🎯 *Entry:* {fmt_price(ai['entry'])}\n"
             f"🛑 *Stop:* {fmt_price(ai['stop'])}\n"
             f"🚀 *Target:* {fmt_price(ai['target'])}\n"
@@ -524,6 +547,9 @@ Return ONLY valid JSON:
             "prev_low": tech["prev_low"],
             "current_volume": tech["current_volume"],
             "avg_20_volume": tech["avg_20_volume"],
+            "intraday_confirmations": intraday_info.get("confirmations"),
+            "intraday_required": intraday_info.get("required_confirmations"),
+            "intraday_reason": intraday_info.get("reason"),
             "market_bias": market["bias"],
             "market_details": ", ".join(market["details"]),
             "reasons": ", ".join(setup["reasons"])
@@ -573,6 +599,7 @@ Return ONLY valid JSON:
                     c["setup"],
                     c["tech"],
                     c["ai"],
+                    c.get("intraday"),
                     c["ranking_score"]
                 )
                 self.mark_alert(c["ticker"], c["setup"]["direction"])

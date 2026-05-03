@@ -5,6 +5,7 @@ from market_filter import get_market_bias, market_allows_setup
 from telegram_alert import send_telegram
 from cooldown import is_in_cooldown, update_cooldown
 from sector_filter import sector_confirm
+from storage import save_result
 import time
 
 WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]
@@ -24,11 +25,11 @@ while True:
             if is_in_cooldown(symbol, analysis["signal"]):
                 continue
 
-            allowed, reason = market_allows_setup(analysis["signal"], market["bias"])
+            allowed, _ = market_allows_setup(analysis["signal"], market["bias"])
             if not allowed:
                 continue
 
-            sector_ok, sector_reason = sector_confirm(symbol)
+            sector_ok, _ = sector_confirm(symbol)
             if not sector_ok:
                 continue
 
@@ -37,17 +38,20 @@ while True:
 
             ai_output = ai_decision(symbol, analysis)
 
-            message = f"""
-🚀 {symbol} A+ Setup
+            trade = {
+                "symbol": symbol,
+                "signal": analysis["signal"],
+                "price": analysis["price"],
+                "entry": analysis["entry"],
+                "stop": analysis.get("stop"),
+                "target": analysis.get("target"),
+                "score": analysis["score"],
+                "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
+            }
 
-Signal: {analysis['signal']}
-Entry: {analysis['entry']}
-Price: {analysis['price']}
-Score: {analysis['score']}
+            save_result(trade)
 
-AI:
-{ai_output}
-"""
+            message = f"🚀 {symbol} A+ Setup\nEntry: {analysis['entry']}\nPrice: {analysis['price']}\nScore: {analysis['score']}\n\nAI:\n{ai_output}"
 
             print(message)
             send_telegram(message)

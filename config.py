@@ -4,7 +4,7 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
-    
+
 
 MARKET_TZ = ZoneInfo("America/New_York")
 
@@ -77,15 +77,18 @@ DMA_SLOW = 200
 
 ORB_MINUTES = 15
 
-MIN_CALL_SCORE = 90
-MIN_PUT_SCORE = 90
-MIN_AI_CONFIDENCE = 85
+# Relaxed enough for A/B+ intraday momentum, still filtered by AI + intraday confirmation.
+MIN_CALL_SCORE = 75
+MIN_PUT_SCORE = 75
+MIN_AI_CONFIDENCE = 75
 
 MAX_EXTENSION_FROM_VWAP_PCT = 2.5
 MAX_EXTENSION_FROM_ORB_PCT = 1.5
 RETEST_TOLERANCE_PCT = 0.35
-MIN_RISK_REWARD = 1.8
-REQUIRE_RETEST = True
+MIN_RISK_REWARD = 1.5
+
+# Retest is now a bonus/quality signal, not a hard blocker.
+REQUIRE_RETEST = False
 STRICT_RETEST_IN_CHOP = True
 
 RELATIVE_STRENGTH_WEIGHT = 10
@@ -107,20 +110,15 @@ SR_REJECTION_WEIGHT = 25
 RANK_TOP_ALERTS_ONLY = True
 MAX_ALERTS_PER_SCAN = 5
 
-# Hard A+ breakout gate
-REQUIRE_PM_OR_PD_BREAK_FOR_A_PLUS = True
-A_PLUS_BREAKOUT_BONUS = 20
-A_PLUS_BREAKOUT_PENALTY = 35
-
 # Quality trading windows ET
 QUALITY_WINDOWS = [
     ("09:30", "12:30"),
     ("13:30", "15:30"),
 ]
 
-# Sector ETF confirmation
+# Sector ETF confirmation is a scoring input, not a hard blocker.
 SECTOR_ETF_WEIGHT = 15
-REQUIRE_SECTOR_CONFIRMATION = True
+REQUIRE_SECTOR_CONFIRMATION = False
 
 # Regime-aware scoring
 ENABLE_REGIME_SCORING = True
@@ -136,3 +134,8 @@ SECTOR_ETF_MAP = {
 }
 
 LOG_FILE = "stock_technical_alerts.csv"
+
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")

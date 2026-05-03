@@ -16,15 +16,14 @@ def analyze_stock(df):
     breakout = price > breakout_level
     breakdown = price < breakdown_level
 
-    # Early setup logic: alert before breakout becomes extended.
     near_breakout = breakout_level > 0 and 0 <= ((breakout_level - price) / breakout_level) * 100 <= 1.5
     near_breakdown = breakdown_level > 0 and 0 <= ((price - breakdown_level) / breakdown_level) * 100 <= 1.5
 
-    # Retest logic: breakout happened recently and price is holding near trigger.
     retest_breakout = breakout_level > 0 and prev.Close > breakout_level and latest.Low <= breakout_level * 1.01 and price >= breakout_level
     retest_breakdown = breakdown_level > 0 and prev.Close < breakdown_level and latest.High >= breakdown_level * 0.99 and price <= breakdown_level
 
-    volume_spike = rel_volume >= 1.8
+    # Relaxed thresholds so the bot produces useful B+/early alerts while still blocking late moves.
+    volume_spike = rel_volume >= 1.5
     early_volume = rel_volume >= 1.2
     compression = latest.ATR14 < latest.ATR10AVG
 
@@ -61,7 +60,7 @@ def analyze_stock(df):
 
     if volume_spike:
         score += 20
-        reasons.append("Relative volume >= 1.8x")
+        reasons.append("Relative volume >= 1.5x")
     elif early_volume:
         score += 10
         reasons.append("Relative volume >= 1.2x")
@@ -86,7 +85,6 @@ def analyze_stock(df):
     elif near_breakdown and breakdown_level > 0:
         distance_to_trigger_pct = ((price - breakdown_level) / breakdown_level) * 100
 
-    # Hard late-entry block: avoid chasing completely.
     late_entry = extended_pct > 2.0
     very_late_entry = extended_pct > 3.0
     if late_entry:
@@ -159,11 +157,16 @@ def analyze_stock(df):
     )
 
     early_a_plus = (
-        score >= 75
+        score >= 65
         and not late_entry
         and early_volume
-        and compression
         and signal in {"BULLISH EARLY WATCH", "BEARISH EARLY WATCH"}
+    )
+
+    b_plus = (
+        score >= 65
+        and not late_entry
+        and signal not in {"SIDEWAYS"}
     )
 
     return {
@@ -172,6 +175,8 @@ def analyze_stock(df):
         "score": int(max(0, min(score, 100))),
         "a_plus": bool(a_plus),
         "early_a_plus": bool(early_a_plus),
+        "b_plus": bool(b_plus),
+        "tier": "A+" if a_plus else "Early A+" if early_a_plus else "B+" if b_plus else "C",
         "late_entry": bool(late_entry),
         "trigger": round(trigger, 2) if trigger else None,
         "stop": round(stop, 2) if stop else None,

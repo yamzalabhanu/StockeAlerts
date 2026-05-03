@@ -6,6 +6,7 @@ from telegram_alert import send_telegram
 from cooldown import is_in_cooldown, update_cooldown
 from sector_filter import sector_confirm
 from storage import save_result
+from options_engine import select_option_contract, option_to_dict, format_option_alert
 import time
 
 WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]
@@ -38,6 +39,9 @@ while True:
 
             ai_output = ai_decision(symbol, analysis)
 
+            option_candidate = select_option_contract(symbol, analysis)
+            option_dict = option_to_dict(option_candidate)
+
             trade = {
                 "symbol": symbol,
                 "signal": analysis["signal"],
@@ -47,11 +51,22 @@ while True:
                 "target": analysis.get("target"),
                 "score": analysis["score"],
                 "direction": "LONG" if "BULL" in analysis["signal"] else "SHORT",
+                "option": option_dict,
             }
 
             save_result(trade)
 
-            message = f"🚀 {symbol} A+ Setup\nEntry: {analysis['entry']}\nPrice: {analysis['price']}\nScore: {analysis['score']}\n\nAI:\n{ai_output}"
+            option_text = format_option_alert(option_candidate)
+
+            message = (
+                f"🚀 {symbol} A+ Setup\n"
+                f"Signal: {analysis['signal']}\n"
+                f"Entry: {analysis['entry']}\n"
+                f"Price: {analysis['price']}\n"
+                f"Score: {analysis['score']}\n\n"
+                f"{option_text}\n\n"
+                f"AI:\n{ai_output}"
+            )
 
             print(message)
             send_telegram(message)

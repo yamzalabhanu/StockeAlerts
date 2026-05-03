@@ -2,21 +2,15 @@ import asyncio
 
 from bot import StockTechnicalAIBot
 from config import BASE_WATCHLIST
+from bot_enhancements import apply_enhancements
 
 
 async def main():
-    """Launch the advanced technical AI bot.
+    """Launch the advanced technical AI bot with adaptive + regime enhancements."""
 
-    This replaces the older standalone scanner and ensures running:
+    # 🔥 Inject adaptive learning + market regime scoring
+    apply_enhancements(StockTechnicalAIBot)
 
-        python main.py
-
-    uses the advanced features implemented in:
-    - bot.py
-    - bot_technical.py
-    - chart_capture.py
-    - intraday_confirm.py
-    """
     bot = StockTechnicalAIBot(BASE_WATCHLIST)
     await bot.run()
 

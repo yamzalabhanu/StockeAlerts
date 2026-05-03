@@ -5,7 +5,6 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MARKET_TZ = ZoneInfo("America/New_York")
 

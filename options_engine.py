@@ -12,6 +12,7 @@ POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "100"))
 MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "250"))
 MAX_SPREAD_PCT = float(os.getenv("MAX_OPTION_SPREAD_PCT", "12"))
+MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
 TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
 TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
@@ -67,20 +68,8 @@ def _spread_pct(bid: Optional[float], ask: Optional[float]) -> Optional[float]:
     return ((ask - bid) / mid) * 100
 
 
-def _safe_get(payload: dict, *keys):
-    cur = payload
-    for key in keys:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-    return cur
-
-
 def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
-    """Pick a liquid near-ATM option contract using Polygon snapshot data.
-
-    If Polygon data/API key is unavailable, returns a SKIP candidate instead of breaking stock scanning.
-    """
+    """Pick a liquid near-ATM option contract using Polygon snapshot data."""
     option_type = _option_side_from_signal(analysis.get("signal", ""))
     if not option_type:
         return OptionCandidate(symbol, "", "", 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "No directional option side")
@@ -105,7 +94,7 @@ def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
             resp = requests.get(url, params=params, timeout=15)
             resp.raise_for_status()
             results = resp.json().get("results", [])
-        except Exception as exc:
+        except Exception:
             continue
 
         for item in results:
@@ -137,13 +126,16 @@ def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
                 continue
             if oi < MIN_OPTION_OI:
                 continue
+            if iv is not None and float(iv) > MAX_IV:
+                continue
             if delta is not None and not (TARGET_MIN_DELTA <= abs(float(delta)) <= TARGET_MAX_DELTA):
                 continue
 
             atm_score = -abs(strike - price)
             liq_score = (volume / 100) + (oi / 1000)
             spread_score = -(spread or MAX_SPREAD_PCT)
-            score = atm_score + liq_score + spread_score
+            iv_score = -(float(iv) * 5) if iv is not None else 0
+            score = atm_score + liq_score + spread_score + iv_score
 
             if score > best_score:
                 best_score = score
@@ -165,17 +157,29 @@ def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
                     volume=int(volume),
                     open_interest=int(oi),
                     status="OK",
-                    reason="Liquid near-ATM contract selected",
+                    reason="Liquid near-ATM contract selected with IV filter",
                 )
 
     if best:
         return best
 
-    return OptionCandidate(symbol, "", option_type.upper(), 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "No liquid option contract passed filters")
+    return OptionCandidate(symbol, "", option_type.upper(), 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "No option passed liquidity, spread, delta, and IV filters")
 
 
 def option_to_dict(candidate: OptionCandidate) -> dict:
     return asdict(candidate)
+
+
+def estimate_option_pnl(entry_premium: float, exit_premium: float, contracts: int = 1) -> dict:
+    multiplier = 100
+    pnl = (exit_premium - entry_premium) * contracts * multiplier
+    return {
+        "entry_premium": entry_premium,
+        "exit_premium": exit_premium,
+        "contracts": contracts,
+        "pnl_dollars": round(pnl, 2),
+        "pnl_pct": round(((exit_premium - entry_premium) / entry_premium) * 100, 2) if entry_premium else 0,
+    }
 
 
 def format_option_alert(candidate: OptionCandidate) -> str:

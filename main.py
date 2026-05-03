@@ -17,14 +17,49 @@ from smc_confirm import smc_confirmation
 
 
 WATCHLIST = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA",
-    "AMD", "NFLX", "SHOP", "COIN", "ROKU", "PLTR",
-    "SMH", "MU", "AVGO", "LRCX", "KLAC", "ASML",
-    "RIVN", "LCID", "NIO",
-    "SPY", "QQQ", "IWM", "XLF", "XLE",
-    "XOM", "CVX", "SLB",
-    "JPM", "GS", "BAC",
-    "MRNA", "REGN", "VRTX",
+    # 🔥 Mega Cap Leaders
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
+
+    # ⚡ High Beta / Momentum
+    "AMD","NFLX","SHOP","COIN","ROKU","PLTR",
+
+    # 🧠 AI / Data Center Infra
+    "NVDA","SMH","AVGO","ASML","LRCX","KLAC",
+    "ANET","DELL","HPE","SUPM","ARM",
+
+    # 💾 Memory / Storage (CYCLICAL MOMENTUM)
+    "MU","WDC","STX","SKYY","UMC",
+
+    # ⚡ Semiconductor Supply Chain
+    "AMAT","TER","ONTO","IPGP",
+
+    # 🔋 Energy + Nuclear Theme
+    "XOM","CVX","SLB","HAL",
+    "URA","CCJ","BWXT","LEU",
+
+    # ⚛️ Nuclear / Uranium (HIGH MOMENTUM)
+    "SMR","OKLO","UEC","NXE",
+
+    # 🧬 Quantum / Next-Gen Compute
+    "IONQ","QBTS","RGTI",
+
+    # ☁️ Cloud / Software Infra
+    "CRM","SNOW","MDB","DDOG","NET","ZS",
+
+    # 📡 Networking / Infra
+    "CSCO","JNPR","EXTR",
+
+    # 🚗 EV + Future Mobility
+    "RIVN","LCID","NIO",
+
+    # 🏦 Financials (Momentum Rotation)
+    "JPM","GS","BAC",
+
+    # 🧪 Biotech Movers
+    "MRNA","REGN","VRTX",
+
+    # 📊 ETFs (Market + Sector Bias)
+    "SPY","QQQ","IWM","XLF","XLE","SMH","XLK"
 ]
 
 SCAN_INTERVAL_SECONDS = 300

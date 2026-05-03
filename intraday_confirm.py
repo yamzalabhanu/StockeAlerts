@@ -7,13 +7,16 @@ def _vwap(df):
 
 
 def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
-    """Confirm swing setup with relaxed recent 5-minute price action.
+    """Confirm setup with relaxed recent 5-minute price action.
+
+    Works with both:
+    - main.py/analyzer payloads: signal, score, trigger
+    - bot.py setup payloads: direction, score, trigger/recent level fields
 
     Relaxed logic:
-    - Uses a 2-of-4 confirmation model for strong daily B+ setups.
-    - Uses a 3-of-4 confirmation model for normal setups.
-    - Allows momentum/continuation entries up to 2% from trigger.
-    - Keeps daily/market/sector filters strict; this only relaxes intraday timing.
+    - Score >= 75: require 2 of 4 confirmations.
+    - Score < 75: require 3 of 4 confirmations.
+    - Allows continuation entries up to 2% from trigger.
     """
     df = get_stock_data(symbol, period="5d", interval="5m")
     if len(df) < 30:
@@ -34,13 +37,29 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
     candle_range = max(high - low, 0.01)
     body_pct = abs(price - open_price) / candle_range
 
-    signal = analysis.get("signal", "")
-    trigger = analysis.get("trigger")
+    signal = str(analysis.get("signal", "") or "").upper()
+    direction = str(analysis.get("direction", "") or "").upper()
     daily_score = int(analysis.get("score", 0) or 0)
+
+    trigger = (
+        analysis.get("trigger")
+        or analysis.get("breakout_level")
+        or analysis.get("breakdown_level")
+        or analysis.get("entry")
+    )
+
     rel_vol = float(latest.RelVol5m) if latest.RelVol5m == latest.RelVol5m else 0.0
 
-    bullish_signal = "BULLISH" in signal or "UPTREND" in signal
-    bearish_signal = "BEARISH" in signal or "DOWNTREND" in signal
+    bullish_signal = (
+        "BULLISH" in signal
+        or "UPTREND" in signal
+        or direction in {"CALL", "CALLS", "LONG", "BULLISH"}
+    )
+    bearish_signal = (
+        "BEARISH" in signal
+        or "DOWNTREND" in signal
+        or direction in {"PUT", "PUTS", "SHORT", "BEARISH"}
+    )
 
     ema9 = float(latest.EMA9)
     ema21 = float(latest.EMA21)
@@ -63,11 +82,14 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
 
     trigger_distance_pct = 0.0
     if trigger:
-        trigger = float(trigger)
-        if bullish_signal and price > trigger:
-            trigger_distance_pct = ((price - trigger) / trigger) * 100
-        elif bearish_signal and price < trigger:
-            trigger_distance_pct = ((trigger - price) / trigger) * 100
+        try:
+            trigger = float(trigger)
+            if bullish_signal and price > trigger:
+                trigger_distance_pct = ((price - trigger) / trigger) * 100
+            elif bearish_signal and price < trigger:
+                trigger_distance_pct = ((trigger - price) / trigger) * 100
+        except (TypeError, ValueError):
+            trigger_distance_pct = 0.0
 
     not_too_extended = trigger_distance_pct <= 2.0
 
@@ -78,13 +100,8 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
         bool(volume_ok),
     ])
 
-    # High-quality daily B+ / breakout setups should not be killed by one missing 5m detail.
-    if daily_score >= 75:
-        approved = confirmations >= 2 and not_too_extended
-        approval_reason = "Approved: B+ setup with relaxed 2/4 intraday confirmation"
-    else:
-        approved = confirmations >= 3 and not_too_extended
-        approval_reason = "Approved: 3/4 intraday confirmations"
+    required_confirmations = 2 if daily_score >= 75 else 3
+    approved = confirmations >= required_confirmations and not_too_extended
 
     reason_parts = []
     if not ema_align:
@@ -98,10 +115,16 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
     if not not_too_extended:
         reason_parts.append("price extended >2.0% from intraday trigger")
 
+    approval_reason = (
+        f"Approved: relaxed {confirmations}/{required_confirmations} intraday confirmation"
+        if approved
+        else "; ".join(reason_parts)
+    )
+
     details = {
         "approved": bool(approved),
         "confirmations": int(confirmations),
-        "required_confirmations": 2 if daily_score >= 75 else 3,
+        "required_confirmations": int(required_confirmations),
         "price": round(price, 2),
         "ema9_5m": round(ema9, 2),
         "ema21_5m": round(ema21, 2),
@@ -113,6 +136,6 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
         "vwap_ok": bool(vwap_ok),
         "candle_ok": bool(candle_ok),
         "volume_ok": bool(volume_ok),
-        "reason": approval_reason if approved else "; ".join(reason_parts),
+        "reason": approval_reason,
     }
     return bool(approved), details

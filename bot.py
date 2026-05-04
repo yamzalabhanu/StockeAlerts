@@ -13,6 +13,7 @@ from bot_utils import fmt_price, extract_gpt_json, normalize_ai_response
 from outcome_tracker import track_outcome
 from chart_capture import capture_chart
 from intraday_confirm import intraday_confirmation
+from ai_scoring import ai_score_setup
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -27,16 +28,14 @@ def log_alert(row: Dict[str, Any]):
         pass
 
     fields = [
-        "timestamp", "ticker", "direction", "entry_mode", "score", "ranking_score",
+        "timestamp", "ticker", "direction", "entry_mode", "score", "rule_score", "ranking_score",
         "ai_verdict", "ai_confidence", "setup_quality", "entry_timing",
         "entry", "stop", "target", "risk_reward",
         "retest_confirmed", "late_breakout_risk", "ai_reason",
         "price", "vwap", "ema9", "ema21", "ema50",
         "dma20", "dma50", "dma200", "atr14",
-        "trend_5m", "trend_15m",
-        "orb_high", "orb_low",
-        "premarket_high", "premarket_low",
-        "prev_high", "prev_low",
+        "trend_5m", "trend_15m", "orb_high", "orb_low",
+        "premarket_high", "premarket_low", "prev_high", "prev_low",
         "current_volume", "avg_20_volume",
         "intraday_confirmations", "intraday_required", "intraday_reason",
         "market_bias", "market_details", "reasons",
@@ -88,6 +87,23 @@ class StockTechnicalAIBot(StockTechnicalBase):
         rr = reward / risk if risk > 0 else 0
         return entry, stop, target, rr
 
+    def apply_ai_scoring(self, ticker, tech, setup):
+        """Replace rule score with AI score while preserving the original rule score."""
+        setup = dict(setup)
+        rule_score = int(setup.get("score", 0) or 0)
+        setup["rule_score"] = rule_score
+
+        try:
+            ai_score = int(ai_score_setup(ticker, tech, setup) or rule_score)
+            ai_score = max(0, min(ai_score, 100))
+        except Exception as e:
+            print(f"{ticker}: AI scoring failed, keeping rule score: {e}")
+            ai_score = rule_score
+
+        setup["score"] = ai_score
+        setup.setdefault("reasons", []).append(f"AI score override: {rule_score} -> {ai_score}")
+        return setup
+
     def detect_entry_mode(self, setup, tech, intraday_info):
         direction = setup["direction"]
         reasons_text = " ".join(setup.get("reasons", [])).lower()
@@ -128,7 +144,7 @@ class StockTechnicalAIBot(StockTechnicalBase):
             "entry_timing": "EARLY" if entry_mode in {"BREAKOUT", "MOMENTUM"} else "IDEAL",
             "retest_confirmed": bool(setup.get("retest_confirmed")),
             "late_breakout_risk": bool(setup.get("late_breakout_risk")),
-            "reason": f"OpenAI not configured; ATR rule fallback approved using {entry_mode} mode." if verdict == "BUY" else f"OpenAI not configured; rule fallback waiting using {entry_mode} mode.",
+            "reason": f"ATR fallback decision using {entry_mode} mode.",
         }
 
     def ask_ai_decision(self, ticker, setup, tech, intraday_info, entry_mode, mode_reason):
@@ -145,8 +161,9 @@ Ticker: {ticker}
 Direction: {setup['direction']}
 Entry Mode: {entry_mode}
 Entry Mode Reason: {mode_reason}
-Rule Score: {setup['score']}
-Rule Reasons: {', '.join(setup.get('reasons', []))}
+AI Score: {setup['score']}
+Original Rule Score: {setup.get('rule_score')}
+Reasons: {', '.join(setup.get('reasons', []))}
 
 Price: {tech['price']}
 VWAP: {tech['vwap']}
@@ -159,30 +176,18 @@ ORB High/Low: {tech['orb_high']} / {tech['orb_low']}
 Premarket High/Low: {tech['premarket_high']} / {tech['premarket_low']}
 Previous Day High/Low: {tech['prev_high']} / {tech['prev_low']}
 Recent High/Low: {tech['recent_high']} / {tech['recent_low']}
-Current Volume / Avg20: {tech['current_volume']} / {tech['avg_20_volume']}
+Volume: {tech['current_volume']} / Avg20 {tech['avg_20_volume']}
+Intraday Confirmation: {intraday_info}
+Market Bias: {market}
 
-Intraday Confirmation:
-{intraday_info}
+ATR Plan: entry={fallback_entry}, stop={fallback_stop}, target={fallback_target}, rr={fallback_rr}
 
-ATR Suggested Plan:
-Entry: {fallback_entry}
-Stop: {fallback_stop}
-Target: {fallback_target}
-Risk/Reward: {fallback_rr}
-
-Market ETF Bias:
-Bias: {market['bias']}
-Bullish ETFs: {market['bullish_count']}
-Bearish ETFs: {market['bearish_count']}
-Details: {', '.join(market['details'])}
-
-Decision Rules:
-- BREAKOUT mode: allow without perfect retest if volume, VWAP, and intraday confirmation are strong.
-- RETEST mode: prefer best quality; validate reclaim/rejection and defined stop.
-- MOMENTUM mode: allow continuation up to 2% extension only if trend and volume are strong.
-- PULLBACK mode: allow starter only if price reclaims/holds EMA21 or VWAP and risk is defined.
-- Do not reject only because 15m trend is neutral if 5m/VWAP/volume/price action are strong.
-- Reject true chop, failed breakouts, bad risk/reward, or late/extended entries.
+Rules:
+- BREAKOUT: allow without perfect retest if volume, VWAP, and intraday confirmation are strong.
+- RETEST: prefer best quality; validate reclaim/rejection and defined stop.
+- MOMENTUM: allow continuation up to 2% extension only if trend and volume are strong.
+- PULLBACK: allow starter only if price reclaims/holds EMA21 or VWAP and risk is defined.
+- Reject chop, failed moves, late extensions, and poor risk/reward.
 - Minimum acceptable R/R is {MIN_RISK_REWARD}:1.
 
 Return ONLY valid JSON:
@@ -209,10 +214,9 @@ Return ONLY valid JSON:
                     {
                         "role": "system",
                         "content": (
-                            "You are an intraday options scalping risk manager. "
-                            "Approve valid A or B+ setups when entry mode, volume, VWAP/EMA structure, and R/R are acceptable. "
-                            "Do not over-reject good breakout or momentum setups just because retest is imperfect. "
-                            "Still reject chop, failed moves, late extensions, and poor risk/reward."
+                            "You are an intraday options scalping risk manager. Approve valid A/B+ setups "
+                            "when entry mode, volume, VWAP/EMA structure, and R/R are acceptable. "
+                            "Do not over-reject clean breakout or momentum setups just because retest is imperfect."
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -232,28 +236,23 @@ Return ONLY valid JSON:
             base64_image = self.encode_image(image_path)
             prompt = f"""
 Validate the chart image plus data for this intraday options setup.
-
 Ticker: {ticker}
 Direction: {setup['direction']}
 Entry Mode: {entry_mode}
-Mode Reason: {mode_reason}
-Rule Score: {setup['score']}
+AI Score: {setup['score']}
+Rule Score: {setup.get('rule_score')}
 Price: {tech['price']}
 VWAP: {tech['vwap']}
 EMA9/21/50: {tech['ema9']} / {tech['ema21']} / {tech['ema50']}
-ORB H/L: {tech['orb_high']} / {tech['orb_low']}
-PM H/L: {tech['premarket_high']} / {tech['premarket_low']}
-PD H/L: {tech['prev_high']} / {tech['prev_low']}
 ATR14: {tech['atr14']}
 Intraday Confirmation: {intraday_info}
-
 Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_reward, setup_quality, entry_timing, retest_confirmed, late_breakout_risk, reason.
 """
             response = ai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 temperature=0.1,
                 messages=[
-                    {"role": "system", "content": "Use the chart to confirm structure. Allow clean breakout/momentum/retest setups. Reject chop, fakeouts, and late extensions."},
+                    {"role": "system", "content": "Use the chart to confirm structure. Reject chop, fakeouts, and late extensions."},
                     {
                         "role": "user",
                         "content": [
@@ -277,25 +276,14 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
         if rr < MIN_RISK_REWARD:
             return False, f"RR too low {rr}"
-
         if timing in ["LATE", "CHOP"]:
             return False, f"bad timing {timing}"
-
         if bool(ai.get("late_breakout_risk")) and entry_mode not in {"RETEST", "PULLBACK"}:
             return False, "AI sees late breakout risk"
-
         if ai.get("verdict") == "BUY" and confidence >= MIN_AI_CONFIDENCE:
             return True, "AI approved"
-
-        # Controlled override: do not let AI WAIT kill strong confirmed mode setups.
-        if (
-            score >= 80
-            and confirmations >= 3
-            and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"}
-            and rr >= MIN_RISK_REWARD
-        ):
-            return True, "override: strong mode setup with intraday confirmation"
-
+        if score >= 80 and confirmations >= 3 and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
+            return True, "override: strong AI-scored setup with intraday confirmation"
         return False, ai.get("reason", "AI did not approve")
 
     async def build_candidate(self, ticker):
@@ -303,15 +291,19 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         if not tech:
             return None
 
-        call = self.score_call_setup(tech)
-        put = self.score_put_setup(tech)
+        call = self.apply_ai_scoring(ticker, tech, self.score_call_setup(tech))
+        put = self.apply_ai_scoring(ticker, tech, self.score_put_setup(tech))
         best = call if call["score"] >= put["score"] else put
         min_score = MIN_CALL_SCORE if best["direction"] == "CALL" else MIN_PUT_SCORE
 
-        print(f"{ticker}: price={fmt_price(tech['price'])}, CALL={call['score']}, PUT={put['score']}, best={best['direction']}")
+        print(
+            f"{ticker}: price={fmt_price(tech['price'])}, "
+            f"CALL_AI={call['score']} (rule={call.get('rule_score')}), "
+            f"PUT_AI={put['score']} (rule={put.get('rule_score')}), best={best['direction']}"
+        )
 
         if best["score"] < min_score:
-            print(f"{ticker}: skipped, score {best['score']} below {min_score}")
+            print(f"{ticker}: skipped, AI score {best['score']} below {min_score}")
             return None
 
         if self.cooldown_active(ticker, best["direction"]):
@@ -348,12 +340,10 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
         ranking_score = best["score"] + int(ai.get("confidence", 0)) + float(ai.get("risk_reward", 0)) * 10
         ranking_score += {"RETEST": 25, "BREAKOUT": 20, "MOMENTUM": 15, "PULLBACK": 10}.get(entry_mode, 5)
-
         if ai.get("setup_quality") == "A+":
             ranking_score += 20
         elif ai.get("setup_quality") == "A":
             ranking_score += 10
-
         if intraday_info.get("approved"):
             ranking_score += 15
         if intraday_info.get("confirmations", 0) >= 3:
@@ -394,7 +384,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"━━━━━━━━━━━━━━━\n"
             f"📅 *Day:* {tech['trading_day']}\n"
             f"💰 *Price:* ${fmt_price(tech['price'])}\n"
-            f"⭐ *Rule Score:* {setup['score']}/100\n"
+            f"⭐ *AI Score:* {setup['score']}/100 | *Rule:* {setup.get('rule_score')}\n"
             f"🏅 *Rank Score:* {ranking_score:.1f}\n"
             f"🎯 *Mode:* {entry_mode} — {mode_reason}\n"
             f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%)\n"
@@ -427,6 +417,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "direction": direction,
             "entry_mode": entry_mode,
             "score": setup["score"],
+            "rule_score": setup.get("rule_score"),
             "ranking_score": ranking_score,
             "ai_verdict": ai["verdict"],
             "ai_confidence": ai["confidence"],
@@ -488,7 +479,6 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
             self.tickers = self.get_auto_watchlist()
             candidates = []
-
             for ticker in self.tickers:
                 candidate = await self.check_ticker(ticker)
                 if candidate:

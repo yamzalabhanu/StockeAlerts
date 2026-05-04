@@ -1,26 +1,14 @@
 from playwright.async_api import async_playwright
-
-
-def tv_symbol(ticker):
-    ticker = ticker.upper()
-
-    etfs = {"SPY", "QQQ", "IWM", "SMH", "TQQQ", "SQQQ", "DIA", "ARKK"}
-    nyse = {
-        "BA", "JPM", "BAC", "GS", "XOM", "CVX", "OXY",
-        "LLY", "NVO", "PLTR", "UBER", "RIVN", "NIO"
-    }
-
-    if ticker in etfs:
-        return f"AMEX:{ticker}"
-
-    if ticker in nyse:
-        return f"NYSE:{ticker}"
-
-    return f"NASDAQ:{ticker}"
+from symbol_utils import tradingview_symbol, normalize_symbol, is_valid_symbol
 
 
 async def capture_chart(ticker, filename="chart.png"):
-    symbol = tv_symbol(ticker)
+    symbol_clean = normalize_symbol(ticker)
+
+    if not is_valid_symbol(symbol_clean):
+        raise ValueError(f"Invalid symbol for chart capture: {ticker}")
+
+    symbol = tradingview_symbol(symbol_clean)
     url = f"https://www.tradingview.com/chart/?symbol={symbol}"
 
     async with async_playwright() as p:

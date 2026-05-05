@@ -1,4 +1,4 @@
-from adaptive_scoring import get_weight, update_weights, load_weights, save_weights
+from adaptive_scoring import get_weight
 from market_regime import regime_adjustment
 from bot_utils import pct_diff
 from config import *
@@ -16,33 +16,48 @@ def _near_pct(price, level, tolerance_pct):
 def _compute_fib_levels(direction, tech):
     high = tech.get("recent_high")
     low = tech.get("recent_low")
-
     if not high or not low:
         return []
 
     levels = []
     for fib in FIB_LEVELS:
         if direction == "CALL":
-            level = high - (high - low) * fib
+            levels.append(high - (high - low) * fib)
         else:
-            level = low + (high - low) * fib
-        levels.append(level)
-
+            levels.append(low + (high - low) * fib)
     return levels
 
 
-def _is_near_fib(direction, tech):
+def _sr_levels(tech, direction):
+    return [
+        tech.get("ema21"), tech.get("vwap"),
+        tech.get("orb_high") if direction == "CALL" else tech.get("orb_low"),
+        tech.get("premarket_high") if direction == "CALL" else tech.get("premarket_low"),
+        tech.get("prev_high") if direction == "CALL" else tech.get("prev_low"),
+        tech.get("recent_high") if direction == "CALL" else tech.get("recent_low")
+    ]
+
+
+def _fib_confluence(direction, tech):
     if not FIB_FILTER_ENABLED:
         return True
 
     price = tech.get("price")
     fib_levels = _compute_fib_levels(direction, tech)
 
-    for level in fib_levels:
-        if _near_pct(price, level, FIB_TOLERANCE_PCT):
-            return True
+    sr_levels = _sr_levels(tech, direction)
 
-    return False
+    confluence = 0
+
+    for fib in fib_levels:
+        if not _near_pct(price, fib, FIB_TOLERANCE_PCT):
+            continue
+
+        for sr in sr_levels:
+            if _near_pct(fib, sr, FIB_CONFLUENCE_TOLERANCE_PCT):
+                confluence += 1
+
+    return confluence >= FIB_MIN_CONFLUENCE_COUNT
 
 
 def is_strong_pullback(direction, tech, intraday):
@@ -53,7 +68,6 @@ def is_strong_pullback(direction, tech, intraday):
     if not price:
         return False, "No price"
 
-    # EMA/VWAP zone
     near_zone = False
     if ema21 and _near_pct(price, ema21, PULLBACK_ZONE_TOLERANCE_PCT):
         near_zone = True
@@ -63,11 +77,9 @@ def is_strong_pullback(direction, tech, intraday):
     if not near_zone:
         return False, "Not near EMA21/VWAP"
 
-    # Fibonacci confirmation
-    if not _is_near_fib(direction, tech):
-        return False, "Not near Fibonacci level"
+    if not _fib_confluence(direction, tech):
+        return False, "No Fib + SR confluence"
 
-    # Trend alignment
     trend5 = tech.get("trend_5m")
     trend15 = tech.get("trend_15m")
 
@@ -76,7 +88,6 @@ def is_strong_pullback(direction, tech, intraday):
     if direction == "PUT" and not (trend5 == "DOWN" and trend15 == "DOWN"):
         return False, "Trend not aligned"
 
-    # Candle strength
     body = intraday.get("body_pct", 0)
     close_pos = intraday.get("close_position", 0)
 
@@ -88,7 +99,7 @@ def is_strong_pullback(direction, tech, intraday):
     if intraday.get("confirmations", 0) < PULLBACK_MIN_CONFIRMATIONS:
         return False, "Low confirmation"
 
-    return True, "Strong pullback + Fibonacci"
+    return True, "A+ Pullback (Fib + SR confluence)"
 
 
 def apply_enhancements(bot_cls):

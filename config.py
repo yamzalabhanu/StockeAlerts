@@ -75,6 +75,12 @@ PULLBACK_MIN_RR = 2.2
 PULLBACK_STOP_ATR_MULTIPLIER = 0.8
 PULLBACK_TARGET_ATR_MULTIPLIER = 2.5
 
+# Fibonacci pullback confirmation.
+FIB_FILTER_ENABLED = True
+FIB_LEVELS = [0.382, 0.5, 0.618]
+FIB_TOLERANCE_PCT = 0.45
+FIB_LOOKBACK_SWING_BARS = 20
+
 # High win-rate filters. These reduce frequency and prioritize A+ quality.
 HIGH_WIN_RATE_MODE = True
 MIN_INTRADAY_REL_VOL_A_PLUS = 1.3

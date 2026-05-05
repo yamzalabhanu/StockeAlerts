@@ -28,6 +28,26 @@ def _compute_fib_levels(direction, tech):
     return levels
 
 
+def _compute_fib_extensions(direction, tech):
+    if not FIB_EXTENSION_ENABLED:
+        return []
+
+    high = tech.get("recent_high")
+    low = tech.get("recent_low")
+
+    if not high or not low:
+        return []
+
+    extensions = []
+    for ext in FIB_EXTENSION_LEVELS:
+        if direction == "CALL":
+            extensions.append(high + (high - low) * (ext - 1))
+        else:
+            extensions.append(low - (high - low) * (ext - 1))
+
+    return extensions
+
+
 def _sr_levels(tech, direction):
     return [
         tech.get("ema21"), tech.get("vwap"),
@@ -44,7 +64,6 @@ def _fib_confluence(direction, tech):
 
     price = tech.get("price")
     fib_levels = _compute_fib_levels(direction, tech)
-
     sr_levels = _sr_levels(tech, direction)
 
     confluence = 0
@@ -57,7 +76,37 @@ def _fib_confluence(direction, tech):
             if _near_pct(fib, sr, FIB_CONFLUENCE_TOLERANCE_PCT):
                 confluence += 1
 
+    # MTF confluence (proxy using PDH/PDL overlap)
+    if MTF_FIB_CONFLUENCE_ENABLED:
+        for fib in fib_levels:
+            if _near_pct(fib, tech.get("prev_high") or tech.get("prev_low"), MTF_FIB_TOLERANCE_PCT):
+                confluence += 1
+
     return confluence >= FIB_MIN_CONFLUENCE_COUNT
+
+
+def _entry_timing_ok(direction, tech, intraday):
+    if not FIB_ENTRY_ZONE_ENABLED:
+        return True
+
+    price = tech.get("price")
+    fib_levels = _compute_fib_levels(direction, tech)
+
+    in_zone = any(_near_pct(price, fib, FIB_ENTRY_ZONE_TOLERANCE_PCT) for fib in fib_levels)
+
+    if not in_zone:
+        return False
+
+    if FIB_ENTRY_REQUIRE_RECLAIM:
+        body = intraday.get("body_pct", 0)
+        close_pos = intraday.get("close_position", 0)
+
+        if direction == "CALL" and (body < 0.4 or close_pos < 0.6):
+            return False
+        if direction == "PUT" and (body < 0.4 or close_pos > 0.4):
+            return False
+
+    return intraday.get("confirmations", 0) >= FIB_ENTRY_MIN_CONFIRMATIONS
 
 
 def is_strong_pullback(direction, tech, intraday):
@@ -68,17 +117,15 @@ def is_strong_pullback(direction, tech, intraday):
     if not price:
         return False, "No price"
 
-    near_zone = False
-    if ema21 and _near_pct(price, ema21, PULLBACK_ZONE_TOLERANCE_PCT):
-        near_zone = True
-    if vwap and _near_pct(price, vwap, PULLBACK_ZONE_TOLERANCE_PCT):
-        near_zone = True
-
-    if not near_zone:
-        return False, "Not near EMA21/VWAP"
+    if not (ema21 and _near_pct(price, ema21, PULLBACK_ZONE_TOLERANCE_PCT) or
+            vwap and _near_pct(price, vwap, PULLBACK_ZONE_TOLERANCE_PCT)):
+        return False, "Not near EMA/VWAP"
 
     if not _fib_confluence(direction, tech):
-        return False, "No Fib + SR confluence"
+        return False, "No Fib confluence"
+
+    if not _entry_timing_ok(direction, tech, intraday):
+        return False, "Bad entry timing"
 
     trend5 = tech.get("trend_5m")
     trend15 = tech.get("trend_15m")
@@ -88,18 +135,7 @@ def is_strong_pullback(direction, tech, intraday):
     if direction == "PUT" and not (trend5 == "DOWN" and trend15 == "DOWN"):
         return False, "Trend not aligned"
 
-    body = intraday.get("body_pct", 0)
-    close_pos = intraday.get("close_position", 0)
-
-    if direction == "CALL" and (body < 0.4 or close_pos < 0.6):
-        return False, "Weak reclaim candle"
-    if direction == "PUT" and (body < 0.4 or close_pos > 0.4):
-        return False, "Weak rejection candle"
-
-    if intraday.get("confirmations", 0) < PULLBACK_MIN_CONFIRMATIONS:
-        return False, "Low confirmation"
-
-    return True, "A+ Pullback (Fib + SR confluence)"
+    return True, "A+ Pullback (Full Fib System)"
 
 
 def apply_enhancements(bot_cls):
@@ -111,8 +147,8 @@ def apply_enhancements(bot_cls):
     def enhanced_detect_entry_mode(self, setup, tech, intraday_info):
         direction = setup["direction"]
 
-        valid_pullback, reason = is_strong_pullback(direction, tech, intraday_info)
-        if valid_pullback:
+        valid, reason = is_strong_pullback(direction, tech, intraday_info)
+        if valid:
             return "PULLBACK", reason
 
         return "STANDARD", "Weak setup"
@@ -122,12 +158,9 @@ def apply_enhancements(bot_cls):
         if not candidate:
             return None
 
-        setup = candidate["setup"]
-        mode = candidate.get("entry_mode")
-
-        if A_PLUS_MODE and mode == "PULLBACK":
-            if setup["score"] < A_PLUS_PULLBACK_MIN_SCORE:
-                return None
+        # Add fib extension targets
+        if FIB_EXTENSION_ENABLED:
+            candidate["fib_targets"] = _compute_fib_extensions(candidate["setup"]["direction"], candidate["tech"])
 
         return candidate
 

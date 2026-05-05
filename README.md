@@ -1,18 +1,19 @@
 # 🚀 StockeAlerts — Advanced Intraday Stock & Options Alert Bot
 
-StockeAlerts is an advanced intraday stock and options alert system that combines:
+StockeAlerts is an advanced intraday trading system combining:
 
 - Rule-based technical scoring
-- 5-minute intraday confirmation
-- Smart entry-mode detection
-- OpenAI trade-quality filtering
-- TradingView chart screenshot validation
+- Intraday confirmation (5m / 15m)
+- AI-based decision engine
+- A+ setup filtering
+- Adaptive learning
+- TradingView chart validation
 - Telegram alerts
-- CSV logging and outcome tracking
+- Backtesting & dashboard
 
 ---
 
-# 🏗️ Architecture Diagrams (NEW)
+# 🏗️ Architecture Diagrams
 
 ## 🔄 End-to-End Flow
 
@@ -34,11 +35,11 @@ Ranking Engine → Alerts / Execution / Logging
 
 ![AI Pipeline](https://via.placeholder.com/1200x600.png?text=AI+Decision+Pipeline)
 
-- Feature extraction (EMA, VWAP, Volume, Trend)
-- Intraday confirmations
+- Feature extraction (EMA, VWAP, Volume)
+- Intraday confirmation
 - AI scoring
 - Risk/Reward validation
-- Final decision (BUY / WAIT)
+- Final decision
 
 ---
 
@@ -47,69 +48,110 @@ Ranking Engine → Alerts / Execution / Logging
 ![Symbol Pipeline](https://via.placeholder.com/1200x600.png?text=Symbol+Normalization+Pipeline)
 
 ```
-Raw Symbol
-   ↓
-normalize_symbol()
-   ↓
-is_valid_symbol()
-   ↓
-Exchange Mapping
-   ↓
-TradingView Candidates
-   ↓
-Chart Capture (fallback enabled)
+Raw Symbol → normalize_symbol() → is_valid_symbol()
+        ↓
+Exchange Mapping → TradingView Candidates
+        ↓
+Chart Capture (fallback retry)
 ```
-
----
-
-## 📊 Trading Decision Engine
-
-![Decision Engine](https://via.placeholder.com/1200x600.png?text=Trading+Decision+Engine)
-
-- Pullback / Breakout detection
-- Volume + liquidity filters
-- ETF alignment
-- Market regime adjustment
-- Final ranking
 
 ---
 
 ## 🔥 Core Features
 
-### 1. Advanced Technical Engine
+### 🧠 A+ High Win-Rate Mode
+- Pullback ≥ 85
+- Breakout ≥ 80
+- Momentum ≥ 85
 
-The bot calculates and uses:
+### 🎯 Entry Modes
+- PULLBACK (EMA21/VWAP reclaim)
+- BREAKOUT (level break + volume)
+- MOMENTUM (continuation)
+- RETEST (true breakout retest)
 
+### 📊 Technical Indicators
 - VWAP
-- EMA 9 / EMA 21 / EMA 50
-- DMA 20 / DMA 50 / DMA 200
-- ATR(14)
-- ORB high/low
-- Premarket high/low
-- Previous-day high/low
-- Recent high/low
-- 5-minute and 15-minute trend state
-- Volume spike detection
-- Relative strength vs SPY
-- Sector ETF confirmation
-- Market bias using SPY, QQQ, IWM, and SMH
+- EMA 9 / 21 / 50
+- DMA 20 / 50 / 200
+- ATR
+- ORB levels
+- Premarket / Previous day levels
 
 ---
 
-## 🎯 Entry Modes
+## 🧠 AI Engine
 
-- BREAKOUT
-- RETEST
-- MOMENTUM
-- PULLBACK (A+ quality filtered)
+Uses OpenAI to evaluate:
+- Setup quality
+- Risk/reward
+- Entry timing
+- Market context
+
+Outputs structured JSON decision.
 
 ---
 
-## ▶️ Run the Bot
+## 📊 Dashboard
+
+```bash
+streamlit run streamlit_dashboard.py
+```
+
+---
+
+## 🔁 Backtesting
+
+```bash
+python backtest_replay.py
+```
+
+---
+
+## ▶️ Run
 
 ```bash
 python main.py
 ```
+
+---
+
+## ⚙️ Setup
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+playwright install
+```
+
+---
+
+## 🔑 Environment Variables
+
+```
+OPENAI_API_KEY=
+POLYGON_API_KEY=
+TELEGRAM_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+---
+
+## ⚠️ Notes
+
+- Works only during market hours
+- Not financial advice
+- Requires API keys
+
+---
+
+## 🚀 Future Enhancements
+
+- Auto trading (Alpaca)
+- News sentiment
+- Database logging
+- Cloud deployment
 
 ---
 

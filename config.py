@@ -84,6 +84,23 @@ FIB_CONFLUENCE_ENABLED = True
 FIB_CONFLUENCE_TOLERANCE_PCT = 0.55
 FIB_MIN_CONFLUENCE_COUNT = 2
 
+# Fibonacci extensions for targets.
+FIB_EXTENSION_ENABLED = True
+FIB_EXTENSION_LEVELS = [1.272, 1.618]
+FIB_EXTENSION_TARGET_PRIORITY = True
+
+# Multi-timeframe Fibonacci confluence approximation.
+# Uses recent swing + previous day levels as higher-timeframe proxy.
+MTF_FIB_CONFLUENCE_ENABLED = True
+MTF_FIB_TOLERANCE_PCT = 0.65
+MTF_FIB_MIN_MATCHES = 1
+
+# Entry timing inside Fib zone.
+FIB_ENTRY_ZONE_ENABLED = True
+FIB_ENTRY_ZONE_TOLERANCE_PCT = 0.35
+FIB_ENTRY_REQUIRE_RECLAIM = True
+FIB_ENTRY_MIN_CONFIRMATIONS = 3
+
 # High win-rate filters. These reduce frequency and prioritize A+ quality.
 HIGH_WIN_RATE_MODE = True
 MIN_INTRADAY_REL_VOL_A_PLUS = 1.3

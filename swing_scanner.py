@@ -4,10 +4,13 @@ from typing import Dict, Optional, Tuple
 from bot_utils import safe_float
 from config import (
     MIN_RISK_REWARD,
+    SWING_A_PLUS_SCORE,
+    SWING_A_SCORE,
     SWING_ATR_STOP_MULTIPLIER,
     SWING_ATR_TARGET_MULTIPLIER,
     SWING_HOLD_DAYS_MAX,
     SWING_HOLD_DAYS_MIN,
+    SWING_MIN_REASONS,
     SWING_MIN_SCORE,
     SWING_PULLBACK_TOLERANCE_PCT,
 )
@@ -127,21 +130,23 @@ def _rsi_score(direction, rsi):
     return score, reasons
 
 
-def _volume_score(direction, tech):
+def _volume_score(tech):
     avg_vol = safe_float(tech.get("avg_20_volume"))
     cur_vol = safe_float(tech.get("current_volume"))
-    if not avg_vol or not cur_vol:
-        return 0, []
-    rel = cur_vol / avg_vol if avg_vol else 0
+    rel_vol = safe_float(tech.get("rel_volume"))
+    if not rel_vol and avg_vol and cur_vol:
+        rel_vol = cur_vol / avg_vol
     score, reasons = 0, []
-    if rel >= 3:
-        score += 20; reasons.append(f"institutional volume {rel:.1f}x")
-    elif rel >= 2:
-        score += 15; reasons.append(f"strong volume {rel:.1f}x")
-    elif rel >= 1.5:
-        score += 10; reasons.append(f"volume confirmation {rel:.1f}x")
-    elif rel < 0.7:
-        score -= 8; reasons.append(f"weak volume {rel:.1f}x")
+    if not rel_vol:
+        return 0, []
+    if rel_vol >= 3:
+        score += 20; reasons.append(f"institutional volume {rel_vol:.1f}x")
+    elif rel_vol >= 2:
+        score += 15; reasons.append(f"strong volume {rel_vol:.1f}x")
+    elif rel_vol >= 1.5:
+        score += 10; reasons.append(f"volume confirmation {rel_vol:.1f}x")
+    elif rel_vol < 0.7:
+        score -= 8; reasons.append(f"weak volume {rel_vol:.1f}x")
     return score, reasons
 
 
@@ -166,7 +171,7 @@ def _macd_score(direction, macd_val, signal, hist):
     return score, reasons
 
 
-def _adx_proxy_score(direction, tech, price, ema20, ema50):
+def _adx_proxy_score(tech, ema20, ema50):
     adx = tech.get("adx")
     score, reasons = 0, []
     if adx is not None:
@@ -178,7 +183,6 @@ def _adx_proxy_score(direction, tech, price, ema20, ema50):
         elif adx < 18:
             score -= 10; reasons.append(f"ADX chop risk {adx:.1f}")
         return score, reasons
-
     if ema20 and ema50:
         spread = abs(_pct_diff(ema20, ema50) or 0)
         if spread >= 1.5:
@@ -196,7 +200,6 @@ def _structure_score(direction, tech, price, ema20, ema50):
     prev_low = tech.get("prev_low")
     last_lows = _safe_list(tech.get("last_5_lows"))
     last_highs = _safe_list(tech.get("last_5_highs"))
-
     if direction == "CALL":
         resistance = max([x for x in [recent_high, prev_high] if x] or [0])
         if resistance and price >= resistance * 0.995:
@@ -236,7 +239,6 @@ def _mtf_trend_score(direction, tech):
     h4 = str(tech.get("h4_trend", tech.get("trend_4h", ""))).upper()
     bullish = {"BULLISH", "UP", "UPTREND"}
     bearish = {"BEARISH", "DOWN", "DOWNTREND"}
-
     if direction == "CALL":
         if weekly in bullish:
             score += 12; reasons.append("weekly trend bullish")
@@ -244,7 +246,8 @@ def _mtf_trend_score(direction, tech):
             score += 10; reasons.append("daily structure bullish")
         if h4 in bullish:
             score += 8; reasons.append("4H entry trend aligned")
-        aligned = sum([weekly in bullish, daily in bullish, h4 in bullish])
+        if any([weekly, daily, h4]) and sum([weekly in bullish, daily in bullish, h4 in bullish]) <= 1:
+            score -= 12; reasons.append("multi-timeframe conflict risk")
     else:
         if weekly in bearish:
             score += 12; reasons.append("weekly trend bearish")
@@ -252,11 +255,8 @@ def _mtf_trend_score(direction, tech):
             score += 10; reasons.append("daily structure bearish")
         if h4 in bearish:
             score += 8; reasons.append("4H entry trend aligned")
-        aligned = sum([weekly in bearish, daily in bearish, h4 in bearish])
-
-    if aligned <= 1:
-        score -= 12
-        reasons.append("multi-timeframe conflict risk")
+        if any([weekly, daily, h4]) and sum([weekly in bearish, daily in bearish, h4 in bearish]) <= 1:
+            score -= 12; reasons.append("multi-timeframe conflict risk")
     return score, reasons
 
 
@@ -266,72 +266,66 @@ def _score_direction(direction, tech, price, atr, closes) -> Tuple[int, list, fl
     sma200 = tech.get("dma200")
     rsi = tech.get("rsi") or _rsi(closes, 14)
     macd_val, signal, hist = _macd(closes)
-
     score, reasons = 0, []
     for add_score, add_reasons in [
         _trend_strength_score(direction, tech, price, ema20, ema50, sma200),
         _rsi_score(direction, rsi),
-        _volume_score(direction, tech),
+        _volume_score(tech),
         _macd_score(direction, macd_val, signal, hist),
-        _adx_proxy_score(direction, tech, price, ema20, ema50),
+        _adx_proxy_score(tech, ema20, ema50),
         _structure_score(direction, tech, price, ema20, ema50),
         _relative_strength_score(direction, tech),
         _mtf_trend_score(direction, tech),
     ]:
         score += add_score
         reasons.extend(add_reasons)
-
     if direction == "CALL":
         stop = price - atr * SWING_ATR_STOP_MULTIPLIER
         target = price + atr * SWING_ATR_TARGET_MULTIPLIER
     else:
         stop = price + atr * SWING_ATR_STOP_MULTIPLIER
         target = price - atr * SWING_ATR_TARGET_MULTIPLIER
-
     risk = abs(price - stop)
     reward = abs(target - price)
     rr = reward / risk if risk else 0
-
     if rr < MIN_RISK_REWARD:
-        score -= 20
+        score -= 10
         reasons.append(f"RR below minimum {rr:.2f}")
-
     return int(max(score, 0)), reasons, stop, target, rr
+
+
+def _tier(score, reasons_count):
+    if score >= SWING_A_PLUS_SCORE and reasons_count >= 5:
+        return "A+"
+    if score >= SWING_A_SCORE and reasons_count >= 4:
+        return "A"
+    return "WATCH"
 
 
 def score_swing_setup(tech: Dict) -> Optional[Dict]:
     if not tech:
         return None
-
     price = safe_float(tech.get("price"))
     atr = safe_float(tech.get("atr14"))
-    closes = tech.get("daily_closes") or tech.get("last_60_closes") or tech.get("last_5_closes")
-
-    if not price or not atr:
+    if not price:
         return None
-
+    if not atr:
+        atr = max(price * 0.02, 1.0)
+    closes = tech.get("daily_closes") or tech.get("last_60_closes") or tech.get("last_5_closes")
     closes = _safe_list(closes) or [price]
     call_score, call_reasons, call_stop, call_target, call_rr = _score_direction("CALL", tech, price, atr, closes)
     put_score, put_reasons, put_stop, put_target, put_rr = _score_direction("PUT", tech, price, atr, closes)
-
     if call_score >= put_score:
         direction, score, reasons, stop, target, rr = "CALL", call_score, call_reasons, call_stop, call_target, call_rr
     else:
         direction, score, reasons, stop, target, rr = "PUT", put_score, put_reasons, put_stop, put_target, put_rr
 
-    min_reasons = globals().get("SWING_MIN_REASONS", 3)
-
-    if score < SWING_MIN_SCORE or len(reasons) < min_reasons:
+    if score < SWING_MIN_SCORE or len(reasons) < SWING_MIN_REASONS:
         return None
-
-    if score >= 85 and len(reasons) >= 5:
-        tier = "A+"
-    elif score >= 75 and len(reasons) >= 4:
-        tier = "A"
-    else:
-        tier = "WATCH"
+    tier = _tier(score, len(reasons))
     return {
         "alert_type": "SWING",
+        "tier": tier,
         "direction": direction,
         "score": min(score, 100),
         "entry": round(price, 2),
@@ -339,7 +333,7 @@ def score_swing_setup(tech: Dict) -> Optional[Dict]:
         "target": round(target, 2),
         "risk_reward": round(rr, 2),
         "hold_days": f"{SWING_HOLD_DAYS_MIN}-{SWING_HOLD_DAYS_MAX}",
-        "timeframe": "Weekly trend / Daily setup / 4H entry timing",
+        "timeframe": "Weekly / Daily / 4H",
         "reasons": reasons[:10],
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
@@ -348,17 +342,15 @@ def score_swing_setup(tech: Dict) -> Optional[Dict]:
 def format_swing_alert(ticker: str, setup: Dict) -> str:
     emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
     probability = setup.get("ml_probability")
-    prob_line = f"🧠 *ML Probability:* {probability}\n" if probability is not None else ""
+    prob_line = f"🧠 ML Probability: {probability}\n" if probability is not None else ""
     return (
-        f"{emoji} *SWING {setup['direction']} SETUP: {ticker}*\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"⏳ *Hold:* {setup['hold_days']} days\n"
-        f"📅 *Timeframe:* {setup['timeframe']}\n"
-        f"⭐ *Score:* {setup['score']}/100\n"
+        f"{emoji} *{setup.get('tier', 'WATCH')} SWING {setup['direction']} SETUP: {ticker}*\n"
+        f"⭐ Score: {setup['score']}/100\n"
         f"{prob_line}"
-        f"🎯 *Entry:* {setup['entry']}\n"
-        f"🛑 *Stop:* {setup['stop']}\n"
-        f"🚀 *Target:* {setup['target']}\n"
-        f"📐 *R/R:* {setup['risk_reward']}:1\n"
-        f"📝 *Reasons:* {', '.join(setup.get('reasons', []))}"
+        f"⏳ Hold: {setup['hold_days']} days\n"
+        f"🎯 Entry: {setup['entry']}\n"
+        f"🛑 Stop: {setup['stop']}\n"
+        f"🚀 Target: {setup['target']}\n"
+        f"📐 RR: {setup['risk_reward']}:1\n"
+        f"📝 Reasons: {', '.join(setup.get('reasons', []))}"
     )

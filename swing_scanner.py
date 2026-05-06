@@ -319,9 +319,17 @@ def score_swing_setup(tech: Dict) -> Optional[Dict]:
     else:
         direction, score, reasons, stop, target, rr = "PUT", put_score, put_reasons, put_stop, put_target, put_rr
 
-    if score < SWING_MIN_SCORE or len(reasons) < 5:
+    min_reasons = globals().get("SWING_MIN_REASONS", 3)
+
+    if score < SWING_MIN_SCORE or len(reasons) < min_reasons:
         return None
 
+    if score >= 85 and len(reasons) >= 5:
+        tier = "A+"
+    elif score >= 75 and len(reasons) >= 4:
+        tier = "A"
+    else:
+        tier = "WATCH"
     return {
         "alert_type": "SWING",
         "direction": direction,

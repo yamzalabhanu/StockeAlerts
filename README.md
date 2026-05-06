@@ -1,195 +1,310 @@
-# 🚀 StockeAlerts — Advanced Intraday Stock & Options Alert Bot
+# 🚀 StockeAlerts — AI/ML Multi-Strategy Trading Platform
 
-StockeAlerts is an advanced intraday trading system combining:
+StockeAlerts is an advanced AI-driven trading platform combining:
 
-- Rule-based technical scoring
-- Intraday confirmation (5m / 15m)
-- AI-based decision engine
-- A+ setup filtering
-- Adaptive learning
-- TradingView chart validation
+- Intraday scalping engine
+- Swing trading engine
+- Multi-layer ML scoring
+- Fibonacci confluence trading
+- AI chart validation
 - Telegram alerts
-- Backtesting & dashboard
+- Backtesting + replay
+- Adaptive learning
+- Streamlit dashboard
 
 ---
 
-# 🆕 Latest Feature Enhancements (2026 Upgrade)
+# 🆕 2026 Major Enhancements
 
-## 🧠 Multi-Layer ML Trading Engine (NEW 🔥)
+## ⚡ Dual-Mode Trading Engine
 
-### ✔ 3-Level Intelligence System
+StockeAlerts now supports BOTH:
 
-```
-Rule-Based Score
-   ↓
-Setup-Based ML (win-rate learning)
-   ↓
-Feature-Based ML (RSI, Volume, Trend)
-   ↓
-Sklearn Logistic Regression (Probability Model)
-```
+| Mode | Purpose |
+|---|---|
+| ⚡ Intraday | Same-day scalps using 5m / 15m structure |
+| 📈 Swing Trading | Multi-day trend trades (2–10 days) |
 
 ---
 
-## 🤖 Feature-Based ML (RSI / Volume / Trend)
+# 🧠 Multi-Layer AI + ML System
 
-System learns ideal conditions from winning trades:
-
-- RSI behavior
-- Relative volume patterns
-- Trend strength
-
-### ✔ Adaptive Boosting
-
-- Strong RSI zone → score boost
-- High volume → score boost
-- Strong trend → score boost
-
----
-
-## 🧠 Sklearn Logistic Regression Model (NEW 🚀)
-
-### ✔ Predicts Trade Success Probability
-
-Model uses:
-
-- Technical score
-- Risk/Reward ratio
-- Volume vs average volume
-- Price vs VWAP / EMA21
-- 5m / 15m trend alignment
-
-### ✔ Output
+## ✔ 4-Layer Intelligence Stack
 
 ```text
-Probability of trade success (0 → 1)
+Rule-Based Technical Score
+            ↓
+Setup-Based ML Learning
+            ↓
+Feature-Based ML (RSI / Volume / Trend)
+            ↓
+Sklearn Logistic Regression Probability Model
 ```
-
-### ✔ Integrated into scoring
-
-- Score dynamically adjusted
-- Probability stored per trade
 
 ---
 
-## 📊 Example
+## 🤖 Setup-Based ML Learning
+
+System continuously learns:
+
+- Which setup types perform best
+- Win-rate by entry mode
+- Adaptive score adjustments
+
+### Supported Setup Types
+
+- BREAKOUT
+- RETEST
+- MOMENTUM
+- PULLBACK
+- SWING
+
+---
+
+## 📊 Feature-Based ML
+
+System analyzes:
+
+- RSI behavior
+- Relative volume
+- Trend strength
+- VWAP positioning
+- EMA structure
+
+### ✔ Adaptive score boosts
+
+```text
+Strong RSI → Boost
+Strong Volume → Boost
+Strong Trend → Boost
+```
+
+---
+
+## 🧠 Logistic Regression Probability Model (Sklearn)
+
+### ✔ Real ML Probability Prediction
+
+The model predicts:
+
+```text
+Probability of trade success
+```
+
+### Uses Features Like:
+
+- Technical score
+- Risk/reward ratio
+- Price vs VWAP
+- Price vs EMA21
+- Trend alignment
+- Volume participation
+- Intraday confirmations
+
+### Example
 
 ```text
 Base Score: 78
-ML Adjusted Score: 85
-Win Probability: 0.72
+ML Adjusted Score: 86
+Win Probability: 0.74
 ```
 
 ---
 
-## 🧠 Fibonacci Trading System (Pro-Level)
+# 📈 Swing Trading Engine (NEW 🔥)
 
-### ✔ Retracement Levels
+## ✔ Swing Trading Features
+
+- Daily trend analysis
+- DMA20 / DMA50 / DMA200 structure
+- ATR-based stops and targets
+- Pullback + breakout entries
+- Multi-day holds (2–10 days)
+- ML probability scoring
+- Telegram swing alerts
+
+---
+
+## ✔ Swing Trade Conditions
+
+### Bullish Swing Setup
+
+- Price above DMA20 / DMA50
+- DMA20 > DMA50
+- Near recent highs
+- Pullback to DMA20
+- Strong volume
+
+### Bearish Swing Setup
+
+- Price below DMA20 / DMA50
+- DMA20 < DMA50
+- Near recent lows
+- Bearish rejection
+- Strong volume
+
+---
+
+## 📊 Swing Alert Example
+
+```text
+🟢 SWING CALL SETUP: MSFT
+
+Hold: 2-10 days
+Entry: 421.50
+Stop: 408.00
+Target: 455.00
+ML Probability: 0.72
+```
+
+---
+
+# 🧠 Fibonacci Trading Engine
+
+## ✔ Fibonacci Retracement
+
 - 38.2%
 - 50%
 - 61.8%
 
-### ✔ Extension Targets
+## ✔ Fibonacci Extensions
+
 - 1.272 → Partial Profit
 - 1.618 → Final Exit
 
-### ✔ Confluence Logic
-A trade is valid ONLY when Fib aligns with:
-- EMA21 / VWAP
-- ORB levels
+## ✔ Multi-Timeframe Confluence
+
+Fib levels validated against:
+
+- VWAP
+- EMA21
+- ORB
 - Premarket levels
-- Previous day high/low
-- Recent swing levels
+- Previous day highs/lows
+- Swing structure
 
 ---
 
-## 🔁 Multi-Timeframe Confluence
+# 🎯 Smart Entry Engine
 
-System validates Fib across:
-- Intraday swing
-- Previous day high/low
+Entries require:
 
----
-
-## 🎯 Entry Timing Engine
-
-Entries must satisfy:
-- Inside Fibonacci zone
-- Strong reclaim/rejection candle
-- Minimum confirmations (≥ 3)
+- Fib zone alignment
+- Reclaim/rejection confirmation
+- Volume confirmation
+- Trend alignment
+- Risk/reward validation
 
 ---
 
-## 💰 Dynamic Risk Management
+# 💰 Risk Management System
 
-- Position sizing based on stop distance
-- Fixed risk per trade (1%)
-- Capital protection logic
+## ✔ Dynamic Position Sizing
 
----
+Automatically calculates:
 
-## 📊 Smart Exit Strategy
-
-- TP1 → 1.272 (partial exit)
-- TP2 → 1.618 (final exit)
-- Trailing stop after TP1
+- position size
+- risk per trade
+- stop placement
+- capital exposure
 
 ---
 
-## 🧠 Full Trade Lifecycle
+## ✔ Smart Exit System
 
+- Partial profit taking
+- ATR trailing stop
+- Dynamic RR management
+- Multi-target exits
+
+---
+
+# 📊 Full Trading Lifecycle
+
+```text
+Watchlist Scan
+      ↓
+Technical Analysis
+      ↓
+Intraday Engine + Swing Engine
+      ↓
+AI + ML Scoring
+      ↓
+Probability Validation
+      ↓
+Risk Management
+      ↓
+Telegram Alerts
+      ↓
+Dashboard Logging
+      ↓
+Adaptive Learning
 ```
-Scan → A+ Setup → Entry (Fib Zone)
-   ↓
-ML Scoring + Probability
-   ↓
-Position Size (Risk-based)
-   ↓
-TP1 → Partial Exit
-   ↓
-Trailing Stop
-   ↓
-TP2 → Final Exit
-```
 
 ---
 
-## 🔥 System Capabilities
+# 🏗️ System Architecture
 
-- Institutional-grade confluence trading
-- Self-learning adaptive scoring
-- Feature-driven ML intelligence
-- Probability-based trade filtering
-- Risk-managed execution
-
----
-
-# 🏗️ Architecture
-
-```
-Watchlist → Data Fetch → Technical Analysis
+```text
+Market Data APIs
+        ↓
+Technical Analysis Engine
         ↓
 Fib + Confluence Engine
         ↓
-ML Scoring (3 layers)
+Intraday Scanner
         ↓
-Probability Model (Sklearn)
+Swing Scanner
         ↓
-Trade Decision → Alerts / Execution
+ML Scoring Layers
+        ↓
+Sklearn Probability Model
+        ↓
+Trade Ranking Engine
+        ↓
+Telegram + Dashboard
 ```
 
 ---
 
-## 🔧 Setup
+# 📊 Dashboard Features
+
+## Streamlit Dashboard
+
+Tracks:
+
+- alerts
+- ML probabilities
+- win/loss statistics
+- setup performance
+- replay analysis
+- ranking scores
+
+---
+
+# 🔁 Backtesting & Replay
+
+## Features
+
+- Historical replay
+- Outcome tracking
+- ML retraining
+- Setup optimization
+- Adaptive learning
+
+---
+
+# 🔧 Installation
 
 ```bash
 pip install -r requirements.txt
 pip install scikit-learn
+pip install streamlit
 ```
 
 ---
 
-## ▶️ Run
+# ▶️ Run Bot
 
 ```bash
 python main.py
@@ -197,7 +312,15 @@ python main.py
 
 ---
 
-## 🔁 Train ML Models
+# 📊 Run Dashboard
+
+```bash
+streamlit run streamlit_dashboard.py
+```
+
+---
+
+# 🔁 Train ML Models
 
 ```bash
 python backtest_replay.py
@@ -205,34 +328,83 @@ python backtest_replay.py
 
 ---
 
-## 🔑 Environment Variables
+# 🔑 Environment Variables
 
-```
+```text
 OPENAI_API_KEY=
 POLYGON_API_KEY=
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
+ALPACA_API_KEY=
+ALPACA_SECRET_KEY=
 ```
 
 ---
 
-## ⚠️ Notes
+# 🚀 Next Planned Upgrades
 
-- Requires historical data for ML improvement
-- Works best with continuous logging
+## 📈 Portfolio & Position Management
+
+- Open position tracking
+- Portfolio exposure management
+- Risk balancing
+- Sector concentration limits
+
+---
+
+## 💵 Live PnL Dashboard
+
+- Real-time PnL
+- Trade analytics
+- Win-rate by setup
+- Daily/weekly performance
+
+---
+
+## 🤖 Auto Trading (Alpaca)
+
+- Automated execution
+- Smart order routing
+- Dynamic position sizing
+- Stop/target automation
+
+---
+
+## 🌎 Market Regime Intelligence
+
+- Bull/bear/chop detection
+- Strategy adaptation
+- Volatility-aware scoring
+
+---
+
+## 📰 AI Sentiment Engine
+
+- News sentiment
+- Twitter/X analysis
+- Earnings reaction analysis
+- Macro event filtering
+
+---
+
+## ☁️ Cloud Deployment
+
+- Render deployment
+- Docker support
+- Multi-worker scanning
+- API service mode
+
+---
+
+# ⚠️ Notes
+
+- Requires historical logs for ML improvement
+- Works best during active market sessions
+- Swing analysis can run after-hours
 - Not financial advice
 
 ---
 
-## 🚀 Future Enhancements
-
-- Auto-trading (Alpaca integration)
-- Live PnL dashboard
-- News + sentiment ML
-- Cloud deployment
-
----
-
-## 👨‍💻 Author
+# 👨‍💻 Author
 
 Bhanu Yamzala

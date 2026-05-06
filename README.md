@@ -2,15 +2,16 @@
 
 StockeAlerts is an advanced AI-driven trading platform combining:
 
-- Intraday scalping engine
-- Swing trading engine
-- Multi-layer ML scoring
-- Fibonacci confluence trading
-- AI chart validation
-- Telegram alerts
-- Backtesting + replay
-- Adaptive learning
-- Streamlit dashboard
+- ⚡ Intraday scalping engine
+- 📈 Professional swing trading engine
+- 🧠 Multi-layer AI + ML scoring
+- 🔢 Fibonacci confluence trading
+- 📊 Multi-timeframe confirmation
+- 🤖 AI chart validation
+- 📬 Telegram alerts
+- 🔁 Backtesting + replay
+- 📈 Adaptive learning
+- 📊 Streamlit dashboard
 
 ---
 
@@ -70,6 +71,7 @@ System analyzes:
 - Trend strength
 - VWAP positioning
 - EMA structure
+- Momentum quality
 
 ### ✔ Adaptive score boosts
 
@@ -77,6 +79,7 @@ System analyzes:
 Strong RSI → Boost
 Strong Volume → Boost
 Strong Trend → Boost
+Strong Relative Strength → Boost
 ```
 
 ---
@@ -100,6 +103,7 @@ Probability of trade success
 - Trend alignment
 - Volume participation
 - Intraday confirmations
+- Momentum structure
 
 ### Example
 
@@ -111,41 +115,157 @@ Win Probability: 0.74
 
 ---
 
-# 📈 Swing Trading Engine (NEW 🔥)
+# 📈 Professional Swing Trading Engine (MAJOR UPGRADE 🔥)
 
-## ✔ Swing Trading Features
-
-- Daily trend analysis
-- DMA20 / DMA50 / DMA200 structure
-- ATR-based stops and targets
-- Pullback + breakout entries
-- Multi-day holds (2–10 days)
-- ML probability scoring
-- Telegram swing alerts
+The swing engine was upgraded from a simple EMA/DMA scanner into a professional multi-factor confluence system.
 
 ---
 
-## ✔ Swing Trade Conditions
+## ✔ Advanced Swing Confirmation Engine
 
-### Bullish Swing Setup
+Swing trades now validate:
 
-- Price above DMA20 / DMA50
-- DMA20 > DMA50
-- Near recent highs
-- Pullback to DMA20
-- Strong volume
+### ✅ Trend Structure
 
-### Bearish Swing Setup
-
-- Price below DMA20 / DMA50
-- DMA20 < DMA50
-- Near recent lows
-- Bearish rejection
-- Strong volume
+- 20 EMA
+- 50 EMA
+- 200 SMA
+- EMA alignment
+- Long-term trend direction
 
 ---
 
-## 📊 Swing Alert Example
+### ✅ RSI Momentum Engine
+
+Uses:
+
+- RSI 55–70 bullish zone
+- RSI bounce zones
+- Overextended detection
+- Momentum continuation
+
+---
+
+### ✅ Institutional Volume Analysis
+
+Confirms:
+
+- 1.5x–3x volume spikes
+- Breakout participation
+- Weak low-volume moves
+- Institutional accumulation
+
+---
+
+### ✅ MACD Momentum Engine
+
+Validates:
+
+- MACD crossover
+- Histogram direction
+- Zero-line momentum
+- Trend acceleration
+
+---
+
+### ✅ ADX Trend Strength
+
+Detects:
+
+- Strong trends
+- Weak/choppy markets
+- Trend continuation probability
+
+---
+
+### ✅ Breakout + Retest Detection
+
+One of the highest-probability swing setups:
+
+```text
+Breakout
+   ↓
+Retest
+   ↓
+Hold
+```
+
+---
+
+### ✅ Relative Strength vs Market
+
+Compares stock performance against:
+
+- SPY
+- QQQ
+- Sector ETFs
+
+Used to identify:
+
+```text
+Institutional accumulation
+```
+
+---
+
+## 🧠 Multi-Timeframe Swing Confirmation (NEW 🔥)
+
+Swing trades now require:
+
+| Timeframe | Purpose |
+|---|---|
+| 📅 Weekly | Overall trend |
+| 📊 Daily | Setup structure |
+| ⏱️ 4H | Entry timing |
+
+---
+
+## ✔ Multi-Timeframe Logic
+
+### Weekly Chart
+
+Used for:
+
+- macro trend direction
+- institutional trend confirmation
+
+### Daily Chart
+
+Used for:
+
+- breakout structure
+- EMA alignment
+- setup quality
+
+### 4H Chart
+
+Used for:
+
+- entry timing
+- pullback quality
+- momentum confirmation
+
+---
+
+## ✔ Timeframe Conflict Detection
+
+System penalizes:
+
+```text
+Weekly bullish
+Daily bearish
+4H weak
+```
+
+This dramatically reduces:
+
+- fake breakouts
+- countertrend trades
+- low-quality setups
+
+---
+
+# 📊 Swing Alert Example
 
 ```text
 🟢 SWING CALL SETUP: MSFT
@@ -155,6 +275,13 @@ Entry: 421.50
 Stop: 408.00
 Target: 455.00
 ML Probability: 0.72
+
+Reasons:
+- weekly trend bullish
+- breakout retest hold
+- RSI ideal bullish zone
+- institutional volume
+- MACD bullish cross
 ```
 
 ---
@@ -182,6 +309,7 @@ Fib levels validated against:
 - Premarket levels
 - Previous day highs/lows
 - Swing structure
+- Support/resistance
 
 ---
 
@@ -194,6 +322,7 @@ Entries require:
 - Volume confirmation
 - Trend alignment
 - Risk/reward validation
+- Multi-timeframe alignment
 
 ---
 
@@ -228,6 +357,8 @@ Technical Analysis
       ↓
 Intraday Engine + Swing Engine
       ↓
+Confluence Validation
+      ↓
 AI + ML Scoring
       ↓
 Probability Validation
@@ -254,7 +385,9 @@ Fib + Confluence Engine
         ↓
 Intraday Scanner
         ↓
-Swing Scanner
+Professional Swing Scanner
+        ↓
+Multi-Timeframe Confirmation
         ↓
 ML Scoring Layers
         ↓
@@ -279,6 +412,7 @@ Tracks:
 - setup performance
 - replay analysis
 - ranking scores
+- swing vs intraday performance
 
 ---
 
@@ -291,6 +425,7 @@ Tracks:
 - ML retraining
 - Setup optimization
 - Adaptive learning
+- Swing trade analysis
 
 ---
 
@@ -343,6 +478,24 @@ ALPACA_SECRET_KEY=
 
 # 🚀 Next Planned Upgrades
 
+## 🌎 Market Regime Intelligence (HIGH PRIORITY)
+
+Detect:
+
+- trending markets
+- choppy conditions
+- volatility expansion
+- risk-on / risk-off regimes
+
+Then dynamically adapt:
+
+- scoring
+- stop size
+- aggressiveness
+- allowed setups
+
+---
+
 ## 📈 Portfolio & Position Management
 
 - Open position tracking
@@ -367,14 +520,6 @@ ALPACA_SECRET_KEY=
 - Smart order routing
 - Dynamic position sizing
 - Stop/target automation
-
----
-
-## 🌎 Market Regime Intelligence
-
-- Bull/bear/chop detection
-- Strategy adaptation
-- Volatility-aware scoring
 
 ---
 

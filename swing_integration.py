@@ -1,7 +1,16 @@
 import csv
 import datetime as dt
-from config import ENABLE_SWING_ALERTS, LOG_FILE
+import time
+
+from config import (
+    ENABLE_SWING_ALERTS,
+    LOG_FILE,
+    SWING_ALERT_COOLDOWN_SEC,
+)
 from swing_scanner import score_swing_setup, format_swing_alert
+
+
+SWING_ALERT_CACHE = {}
 
 
 def log_swing_alert(ticker, setup, tech):
@@ -42,6 +51,14 @@ def process_swing_candidate(bot, ticker, tech):
     if not ENABLE_SWING_ALERTS:
         return None
 
+    now = time.time()
+    last_alert = SWING_ALERT_CACHE.get(ticker)
+
+    if last_alert and (now - last_alert) < SWING_ALERT_COOLDOWN_SEC:
+        remaining = int((SWING_ALERT_COOLDOWN_SEC - (now - last_alert)) / 60)
+        print(f"{ticker}: swing cooldown active ({remaining}m remaining)")
+        return None
+
     setup = score_swing_setup(tech)
     if not setup:
         return None
@@ -56,6 +73,7 @@ def process_swing_candidate(bot, ticker, tech):
 
     try:
         bot.send_telegram_msg(format_swing_alert(ticker, setup))
+        SWING_ALERT_CACHE[ticker] = now
     except Exception as e:
         print(f"{ticker}: swing telegram error: {e}")
 

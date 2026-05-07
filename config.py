@@ -33,30 +33,64 @@ ACCOUNT_SIZE = 100000
 RISK_PER_TRADE_PCT = 0.01
 MAX_POSITION_PCT = 0.2
 
-BASE_WATCHLIST = [
-    "NVDA", "AMD", "AVGO", "TSM", "ARM", "MU", "INTC", "SMCI",
-    "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "NFLX",
-    "PLTR", "SNOW", "CRM", "ORCL", "ADBE", "NOW", "DDOG", "NET",
-    "CRWD", "PANW", "MDB", "AI",
-    "SNDK", "LITE", "AAOI", "MRVL", "QCOM", "AMAT", "LRCX", "KLAC",
-    "ON", "MPWR", "ALAB", "DELL", "HPE",
-    "IONQ", "RGTI", "QBTS", "QUBT", "ARQQ",
-    "COIN", "MSTR", "MARA", "RIOT", "HOOD", "SOFI", "AFRM", "PYPL",
-    "SQ", "UPST", "RIVN", "LCID", "NIO", "XPEV", "LI", "F", "GM",
-    "XOM", "CVX", "OXY", "SLB", "USO", "FCX", "CLF", "NEM",
-    "LMT", "RTX", "NOC", "BA", "RKLB", "ACHR", "JOBY",
-    "COST", "WMT", "HD", "LOW", "NKE", "SBUX", "MCD",
-    "UAL", "DAL", "AAL", "CCL", "RCL", "ABNB", "UBER",
-    "JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "AXP",
-    "LLY", "NVO", "UNH", "VRTX", "MRNA", "BIIB", "REGN", "AXSM",
-    "SPY", "QQQ", "IWM", "DIA", "SMH", "SOXX", "ARKK", "TQQQ", "SQQQ"
+# --- WATCHLIST TIERS ---
+# CORE: liquid options names scanned every cycle.
+CORE_WATCHLIST = [
+    "SPY", "QQQ", "IWM", "SMH", "SOXX", "TQQQ", "SQQQ",
+    "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
+    "META", "AMZN", "GOOGL", "TSLA",
+    "PLTR", "ARM", "MU", "SMCI", "MRVL",
+    "QCOM", "AMAT", "LRCX", "KLAC",
+    "COIN", "MSTR", "MARA", "RIOT", "HOOD",
+    "BA", "JPM", "LLY", "UNH",
 ]
 
+# SECONDARY: good names, but lower priority than CORE.
+SECONDARY_WATCHLIST = [
+    "INTC", "ORCL", "CRM", "NOW", "ADBE",
+    "PANW", "CRWD", "MDB", "NET", "DDOG", "SNOW",
+    "DELL", "HPE", "ON", "MPWR",
+    "SOFI", "AFRM", "PYPL", "UPST",
+    "XOM", "CVX", "OXY", "SLB", "FCX",
+    "LMT", "RTX", "NOC", "RKLB",
+    "COST", "WMT", "HD", "LOW", "SBUX", "MCD",
+    "UBER", "ABNB",
+    "BAC", "WFC", "GS", "MS", "V", "MA", "AXP",
+    "NVO", "VRTX", "REGN", "MRNA",
+]
+
+# SPEC: scan only when these symbols become active movers.
+SPEC_WATCHLIST = [
+    "IONQ", "RGTI", "QBTS", "QUBT", "ARQQ",
+    "AI", "SNDK", "LITE", "AAOI",
+    "XYZ", "RIVN", "LCID", "NIO", "XPEV", "LI",
+    "F", "GM",
+    "USO", "CLF", "NEM",
+    "ACHR", "JOBY",
+    "NKE",
+    "UAL", "DAL", "AAL", "CCL", "RCL",
+    "BIIB", "AXSM",
+    "ARKK",
+]
+
+# Static universe used as the base scan list.
+BASE_WATCHLIST = list(dict.fromkeys(
+    CORE_WATCHLIST +
+    SECONDARY_WATCHLIST +
+    SPEC_WATCHLIST
+))
+
+# --- AUTO WATCHLIST / DAILY MOVERS ---
+# StockTechnicalBase.get_auto_watchlist() merges today's Polygon movers with BASE_WATCHLIST.
 USE_AUTO_WATCHLIST = True
 AUTO_WATCHLIST_LIMIT = 40
 MIN_AUTO_VOLUME = 2_000_000
 MIN_AUTO_CHANGE_PCT = 2.0
 MIN_STOCK_PRICE = 8
+
+# Symbols from the auto mover list are allowed, but alerts still must pass the same scoring,
+# intraday confirmation, AI gate, liquidity, and cooldown filters.
+AUTO_WATCHLIST_SCAN_REASON = "daily_mover"
 
 MARKET_BIAS_TICKERS = ["SPY", "QQQ", "IWM", "SMH"]
 MARKET_BIAS_WEIGHT = 15

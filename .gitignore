@@ -4,3 +4,6 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+
+# Runtime learning artifacts
+setup_performance_learning.json

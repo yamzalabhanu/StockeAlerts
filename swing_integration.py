@@ -60,6 +60,21 @@ def process_swing_candidate(bot, ticker, tech):
         return None
 
     setup = score_swing_setup(tech)
+    
+    from ai_reasoning_engine import build_reasoning_report
+
+    reasoning = build_reasoning_report(
+        ticker=ticker,
+        setup=setup,
+        tech=tech,
+        bot=bot,
+        trade_type="SWING",
+    )
+
+    setup["ai_reasoning"] = reasoning
+    setup["score"] = reasoning["final_score"]
+    setup["decision"] = reasoning["decision"]
+
     if not setup:
         return None
 
@@ -68,6 +83,7 @@ def process_swing_candidate(bot, ticker, tech):
         adjusted, prob, _ = adjust_score_with_logistic(tech, setup.get("score", 0))
         setup["score"] = adjusted
         setup["ml_probability"] = prob
+        setup["ai_reasoning"] = reasoning_report
     except Exception as e:
         print(f"{ticker}: swing ML skipped: {e}")
 

@@ -1,12 +1,13 @@
 from bot_utils import safe_float
 
-
 GOOD = 'GOOD'
 WARNING = 'WARNING'
 BAD = 'BAD'
 
 
 def evaluate_execution_quality(tech: dict) -> dict:
+    tech = tech or {}
+
     spread_pct = safe_float(tech.get('spread_pct'))
     rel_volume = safe_float(tech.get('rel_volume'))
     candle_body_pct = safe_float(tech.get('candle_body_pct'))
@@ -17,7 +18,6 @@ def evaluate_execution_quality(tech: dict) -> dict:
     warnings = []
     strengths = []
 
-    # Spread quality
     if spread_pct is not None:
         if spread_pct <= 0.15:
             score += 15
@@ -28,7 +28,6 @@ def evaluate_execution_quality(tech: dict) -> dict:
             score -= 15
             warnings.append(f'Wide spread {spread_pct:.2f}%')
 
-    # Relative volume
     if rel_volume is not None:
         if rel_volume >= 2:
             score += 15
@@ -37,7 +36,6 @@ def evaluate_execution_quality(tech: dict) -> dict:
             score -= 10
             warnings.append('Weak volume participation')
 
-    # Candle body quality
     if candle_body_pct is not None:
         if candle_body_pct >= 60:
             score += 12
@@ -46,7 +44,6 @@ def evaluate_execution_quality(tech: dict) -> dict:
             score -= 10
             warnings.append('Weak candle body')
 
-    # Bid ask imbalance
     if bid_ask_imbalance is not None:
         if bid_ask_imbalance > 0.2:
             score += 10
@@ -55,7 +52,6 @@ def evaluate_execution_quality(tech: dict) -> dict:
             score -= 10
             warnings.append('Bearish order flow imbalance')
 
-    # Extension from VWAP
     if distance_from_vwap is not None:
         if abs(distance_from_vwap) > 2.5:
             score -= 15
@@ -80,4 +76,5 @@ def evaluate_execution_quality(tech: dict) -> dict:
 
 
 def should_reject_trade(execution: dict) -> bool:
+    execution = execution or {}
     return execution.get('quality') == BAD

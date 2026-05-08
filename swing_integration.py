@@ -14,11 +14,15 @@ SWING_ALERT_CACHE = {}
 
 
 def log_swing_alert(ticker, setup, tech):
+    setup = setup or {}
+    tech = tech or {}
+
     fields = [
         "timestamp", "ticker", "alert_type", "direction", "entry_mode", "score",
         "ml_probability", "entry", "stop", "target", "risk_reward", "hold_days",
         "price", "dma20", "dma50", "dma200", "atr14", "reasons",
     ]
+
     row = {
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "ticker": ticker,
@@ -32,13 +36,14 @@ def log_swing_alert(ticker, setup, tech):
         "target": setup.get("target"),
         "risk_reward": setup.get("risk_reward"),
         "hold_days": setup.get("hold_days"),
-        "price": (tech or {}).get("price"),
-        "dma20": (tech or {}).get("dma20"),
-        "dma50": (tech or {}).get("dma50"),
-        "dma200": (tech or {}).get("dma200"),
-        "atr14": (tech or {}).get("atr14"),
+        "price": tech.get("price"),
+        "dma20": tech.get("dma20"),
+        "dma50": tech.get("dma50"),
+        "dma200": tech.get("dma200"),
+        "atr14": tech.get("atr14"),
         "reasons": ", ".join(setup.get("reasons", [])),
     }
+
     try:
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
@@ -51,6 +56,8 @@ def process_swing_candidate(bot, ticker, tech):
     if not ENABLE_SWING_ALERTS:
         return None
 
+    tech = tech or {}
+
     now = time.time()
     last_alert = SWING_ALERT_CACHE.get(ticker)
 
@@ -59,33 +66,30 @@ def process_swing_candidate(bot, ticker, tech):
         print(f"{ticker}: swing cooldown active ({remaining}m remaining)")
         return None
 
-    setup = score_swing_setup(tech)
-    
-    from ai_reasoning_engine import build_reasoning_report
+    try:
+        setup = score_swing_setup(tech)
+    except Exception as e:
+        print(f"{ticker}: swing setup scoring error: {e}")
+        return None
 
-    reasoning = build_reasoning_report(
-        ticker=ticker,
-        setup=setup,
-        tech=tech,
-        bot=bot,
-        trade_type="SWING",
-    )
+    if setup is None:
+        return None
 
-    setup["ai_reasoning"] = reasoning
-    setup["score"] = reasoning["final_score"]
-    setup["decision"] = reasoning["decision"]
-
-    if not setup:
+    if not isinstance(setup, dict):
+        print(f"{ticker}: invalid swing setup object")
         return None
 
     try:
         reasoning = build_reasoning_report(
             ticker=ticker,
             setup=setup,
-            tech=tech or {},
+            tech=tech,
             bot=bot,
             trade_type="SWING",
         ) or {}
+
+        if not isinstance(reasoning, dict):
+            reasoning = {}
 
         setup["ai_reasoning"] = reasoning
         setup["score"] = reasoning.get("final_score", setup.get("score", 0))
@@ -97,18 +101,26 @@ def process_swing_candidate(bot, ticker, tech):
 
     try:
         from ml_sklearn_model import adjust_score_with_logistic
-        adjusted, prob, _ = adjust_score_with_logistic(tech or {}, setup.get("score", 0))
+
+        adjusted, prob, model_info = adjust_score_with_logistic(
+            tech,
+            setup.get("score", 0),
+        )
+
         setup["score"] = adjusted
         setup["ml_probability"] = prob
-        setup["ai_reasoning"] = reasoning_report
+        setup["ml_model_info"] = model_info
+
     except Exception as e:
         print(f"{ticker}: swing ML skipped: {e}")
 
     try:
-        bot.send_telegram_msg(format_swing_alert(ticker, setup))
+        message = format_swing_alert(ticker, setup)
+        bot.send_telegram_msg(message)
         SWING_ALERT_CACHE[ticker] = now
     except Exception as e:
         print(f"{ticker}: swing telegram error: {e}")
 
-    log_swing_alert(ticker, setup, tech or {})
+    log_swing_alert(ticker, setup, tech)
+
     return setup

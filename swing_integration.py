@@ -1,11 +1,13 @@
 import csv
 import datetime as dt
+import re
 import time
 
 from config import (
     ENABLE_SWING_ALERTS,
     LOG_FILE,
     SWING_ALERT_COOLDOWN_SEC,
+    SWING_HOLD_DAYS_MAX,
 )
 from swing_scanner import score_swing_setup, format_swing_alert
 from ai_reasoning_engine import build_reasoning_report
@@ -13,6 +15,27 @@ from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 
 SWING_ALERT_CACHE = {}
+
+
+def _hold_days_to_horizon_minutes(hold_days, default_days=SWING_HOLD_DAYS_MAX):
+    """Convert a swing hold-days value into an outcome-tracking horizon.
+
+    Swing alerts display hold windows such as ``"2-10"`` days. For outcome
+    tracking, use the far end of that range so the trade has the full advertised
+    holding window to reach its stop or target.
+    """
+    if hold_days is None or hold_days == "":
+        days = default_days
+    elif isinstance(hold_days, (int, float)):
+        days = hold_days
+    else:
+        day_values = re.findall(r"\d+(?:\.\d+)?", str(hold_days))
+        days = float(day_values[-1]) if day_values else default_days
+
+    if days <= 0:
+        days = default_days
+
+    return int(days * 24 * 60)
 
 
 def log_swing_alert(ticker, setup, tech):
@@ -163,7 +186,7 @@ def process_swing_candidate(bot, ticker, tech):
             alert_time_iso=alert_time,
             alert_type="SWING",
             entry_mode="SWING",
-            horizon_minutes=int(setup.get("hold_days", 5) or 5) * 24 * 60,
+            horizon_minutes=_hold_days_to_horizon_minutes(setup.get("hold_days")),
             setup_context={
                 "setup_key": learning_context.get("setup_key"),
                 "market_regime": (reasoning.get("regime") or {}).get("regime"),

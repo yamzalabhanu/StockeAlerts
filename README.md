@@ -1,36 +1,202 @@
 # 🚀 StockeAlerts — AI/ML Multi-Strategy Trading Platform
 
-StockeAlerts is an advanced AI-driven trading platform combining:
+StockeAlerts is an AI-assisted trading platform for intraday scalping, swing trading, options selection, price projection, setup scoring, Telegram alerts, adaptive learning, and performance review.
 
-- ⚡ Intraday scalping engine
-- 📈 Professional swing trading engine
-- 🧠 Multi-layer AI + ML scoring
-- 🔢 Fibonacci confluence trading
-- 📊 Multi-timeframe confirmation
-- 🤖 AI chart validation
-- 📬 Telegram alerts
-- 🔁 Backtesting + replay
-- 📈 Adaptive learning
-- 📊 Streamlit dashboard
+> ⚠️ Educational/research tool only. This project does not provide financial advice, and all generated signals must be reviewed before use.
 
 ---
 
-# 🆕 2026 Major Enhancements
+## 🆕 Latest Platform Updates
 
-## ⚡ Dual-Mode Trading Engine
+### 🎯 2-Day Price Projection Engine
 
-StockeAlerts now supports BOTH:
+StockeAlerts now includes a dedicated short-term projection layer that estimates the next 2-day directional bias and expected price range.
+
+The projection engine evaluates:
+
+- Current price and ATR-based expected movement
+- RSI momentum
+- ADX trend strength
+- Relative volume participation
+- Market regime context
+- Multi-timeframe alignment
+- AI chart-structure quality
+
+Projection output includes:
+
+| Field | Meaning |
+|---|---|
+| `direction` | BULLISH, BEARISH, or SIDEWAYS |
+| `confidence` | 50–95 confidence score |
+| `projected_move_pct` | ATR-derived low/high move estimate |
+| `expected_price_range` | Projected price range for the next move |
+| `hold_guidance` | Continuation, downside-risk, or consolidation guidance |
+| `risk` | LOW, MEDIUM, or HIGH projection risk |
+
+Example:
+
+```text
+Direction: BULLISH
+Confidence: 82
+Projected Move: 1.8% - 3.7%
+Expected Range: 428.40 - 436.25
+Guidance: Likely continuation for 2-4 days.
+Risk: LOW
+```
+
+---
+
+### 📚 Projection Learning
+
+Projection results can be recorded and compared against actual future price movement.
+
+The learning layer tracks:
+
+- Projected direction
+- Confidence score
+- Expected move range
+- Entry price
+- Actual move percentage
+- Whether the projected direction was correct
+- Projection accuracy after enough samples
+
+This creates a feedback loop for evaluating whether the projection engine is directionally useful over time.
+
+---
+
+### 🧠 Unified AI Reasoning Engine
+
+A new reasoning layer combines market context, setup quality, chart structure, multi-timeframe alignment, execution quality, and historical setup performance into a single report.
+
+The reasoning engine now produces:
+
+- Final adjusted score
+- A+/A/WATCH/REJECT decision
+- Market regime classification
+- Multi-timeframe structure result
+- Execution-quality result
+- Setup-quality result
+- Chart-structure quality
+- Reasons, warnings, and rejection notes
+- Historical learning context
+- Human-readable narrative summary
+
+---
+
+### 🌎 Market Regime Intelligence
+
+Market-regime detection is now an active scoring layer instead of only a planned feature.
+
+Supported regimes include:
+
+- `TRENDING_BULL`
+- `TRENDING_BEAR`
+- `CHOPPY`
+- `HIGH_VOL`
+- `LOW_VOL`
+- `MIXED`
+
+The engine uses ETF breadth, bias, ADX, VIX, and ATR expansion when available. Trending regimes can boost aligned breakout/momentum/retest setups, while choppy or high-volatility regimes tighten filtering and penalize low-quality chase trades.
+
+---
+
+### ⚡ Execution Quality Layer
+
+Before a setup is promoted, the system can evaluate execution risk using liquidity and movement-quality inputs such as:
+
+- Spread quality
+- Relative volume
+- Dollar volume
+- ATR percentage
+- Slippage risk
+- Late breakout risk
+- VWAP/EMA extension
+
+Poor liquidity or poor execution quality can reduce scores or reject otherwise strong-looking setups.
+
+---
+
+### 🧱 Smart Money Concepts (SMC) Confirmation
+
+StockeAlerts includes an optional Smart Money Concepts confirmation module for directional setups.
+
+It checks for:
+
+- Liquidity sweeps
+- Fair value gaps
+- Order-block zones
+- VWAP/EMA directional alignment
+- Volume imbalance
+
+A setup is approved only when the SMC score is strong enough and structure aligns with the selected direction.
+
+---
+
+### 📈 Options Contract Selection + Theta Control
+
+Options support has been expanded with a Polygon snapshot-based selector that can identify liquid near-the-money contracts.
+
+The options layer evaluates:
+
+- Expiration / DTE
+- Strike proximity
+- Bid / ask / mid
+- Spread percentage
+- Delta
+- Theta
+- Implied volatility
+- Volume and open interest
+
+Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
+
+---
+
+### 🧭 Trade Management AI
+
+Open-trade management now evaluates whether to hold, trim, tighten stops, or exit based on trend and follow-through quality.
+
+Inputs include:
+
+- ADX trend strength
+- Relative volume
+- Market regime
+- Multi-timeframe trend
+- Candle follow-through
+- Momentum reversal risk
+- VWAP extension
+- Unrealized R-multiple
+
+---
+
+### 📊 Daily Learning Report
+
+The bot can generate a daily adaptive-learning report summarizing:
+
+- Overall win rate
+- Forecast accuracy
+- Confidence adjustment
+- Score adjustment
+- Strongest setup structures
+- Weak structures that should be penalized
+
+This report helps the system prioritize setups with realized edge instead of only static technical rules.
+
+---
+
+# ⚡ Dual-Mode Trading Engine
+
+StockeAlerts supports both intraday and swing workflows:
 
 | Mode | Purpose |
 |---|---|
 | ⚡ Intraday | Same-day scalps using 5m / 15m structure |
-| 📈 Swing Trading | Multi-day trend trades (2–10 days) |
+| 📈 Swing Trading | Multi-day trend trades, typically 2–10 days |
 
 ---
 
 # 🧠 Multi-Layer AI + ML System
 
-## ✔ 4-Layer Intelligence Stack
+## 4-Layer Intelligence Stack
 
 ```text
 Rule-Based Technical Score
@@ -44,15 +210,17 @@ Sklearn Logistic Regression Probability Model
 
 ---
 
-## 🤖 Setup-Based ML Learning
+## Setup-Based ML Learning
 
-System continuously learns:
+The system continuously learns:
 
 - Which setup types perform best
-- Win-rate by entry mode
+- Win rate by entry mode
+- Forecast accuracy by setup structure
 - Adaptive score adjustments
+- Priority boosts for historically strong structures
 
-### Supported Setup Types
+Supported setup types:
 
 - BREAKOUT
 - RETEST
@@ -62,9 +230,9 @@ System continuously learns:
 
 ---
 
-## 📊 Feature-Based ML
+## Feature-Based ML
 
-System analyzes:
+The system analyzes:
 
 - RSI behavior
 - Relative volume
@@ -72,29 +240,24 @@ System analyzes:
 - VWAP positioning
 - EMA structure
 - Momentum quality
+- Risk/reward quality
+- Intraday confirmations
 
-### ✔ Adaptive score boosts
+Adaptive score examples:
 
 ```text
 Strong RSI → Boost
 Strong Volume → Boost
 Strong Trend → Boost
 Strong Relative Strength → Boost
+Weak historical edge → Penalty
 ```
 
 ---
 
-## 🧠 Logistic Regression Probability Model (Sklearn)
+## Logistic Regression Probability Model
 
-### ✔ Real ML Probability Prediction
-
-The model predicts:
-
-```text
-Probability of trade success
-```
-
-### Uses Features Like:
+The sklearn model predicts the probability of trade success using features such as:
 
 - Technical score
 - Risk/reward ratio
@@ -105,7 +268,7 @@ Probability of trade success
 - Intraday confirmations
 - Momentum structure
 
-### Example
+Example:
 
 ```text
 Base Score: 78
@@ -115,17 +278,15 @@ Win Probability: 0.74
 
 ---
 
-# 📈 Professional Swing Trading Engine (MAJOR UPGRADE 🔥)
+# 📈 Professional Swing Trading Engine
 
-The swing engine was upgraded from a simple EMA/DMA scanner into a professional multi-factor confluence system.
+The swing engine is a multi-factor confluence system for CALL and PUT swing setups.
 
----
+## Advanced Swing Confirmation
 
-## ✔ Advanced Swing Confirmation Engine
+Swing trades validate:
 
-Swing trades now validate:
-
-### ✅ Trend Structure
+### Trend Structure
 
 - 20 EMA
 - 50 EMA
@@ -133,54 +294,34 @@ Swing trades now validate:
 - EMA alignment
 - Long-term trend direction
 
----
-
-### ✅ RSI Momentum Engine
-
-Uses:
+### RSI Momentum
 
 - RSI 55–70 bullish zone
 - RSI bounce zones
 - Overextended detection
 - Momentum continuation
 
----
-
-### ✅ Institutional Volume Analysis
-
-Confirms:
+### Institutional Volume
 
 - 1.5x–3x volume spikes
 - Breakout participation
 - Weak low-volume moves
 - Institutional accumulation
 
----
-
-### ✅ MACD Momentum Engine
-
-Validates:
+### MACD Momentum
 
 - MACD crossover
 - Histogram direction
 - Zero-line momentum
 - Trend acceleration
 
----
-
-### ✅ ADX Trend Strength
-
-Detects:
+### ADX Trend Strength
 
 - Strong trends
 - Weak/choppy markets
 - Trend continuation probability
 
----
-
-### ✅ Breakout + Retest Detection
-
-One of the highest-probability swing setups:
+### Breakout + Retest Detection
 
 ```text
 Breakout
@@ -190,66 +331,21 @@ Retest
 Hold
 ```
 
----
+### Relative Strength vs Market
 
-### ✅ Relative Strength vs Market
-
-Compares stock performance against:
-
-- SPY
-- QQQ
-- Sector ETFs
-
-Used to identify:
-
-```text
-Institutional accumulation
-```
+Compares stock performance against market and sector context to find institutional accumulation or relative weakness.
 
 ---
 
-## 🧠 Multi-Timeframe Swing Confirmation (NEW 🔥)
-
-Swing trades now require:
+## Multi-Timeframe Swing Confirmation
 
 | Timeframe | Purpose |
 |---|---|
-| 📅 Weekly | Overall trend |
-| 📊 Daily | Setup structure |
-| ⏱️ 4H | Entry timing |
+| Weekly | Overall trend |
+| Daily | Setup structure |
+| 4H | Entry timing |
 
----
-
-## ✔ Multi-Timeframe Logic
-
-### Weekly Chart
-
-Used for:
-
-- macro trend direction
-- institutional trend confirmation
-
-### Daily Chart
-
-Used for:
-
-- breakout structure
-- EMA alignment
-- setup quality
-
-### 4H Chart
-
-Used for:
-
-- entry timing
-- pullback quality
-- momentum confirmation
-
----
-
-## ✔ Timeframe Conflict Detection
-
-System penalizes:
+The engine penalizes conflicts such as:
 
 ```text
 Weekly bullish
@@ -257,15 +353,29 @@ Daily bearish
 4H weak
 ```
 
-This dramatically reduces:
-
-- fake breakouts
-- countertrend trades
-- low-quality setups
+This helps reduce fake breakouts, countertrend trades, and low-quality swing entries.
 
 ---
 
-# 📊 Swing Alert Example
+# 📊 Alert Examples
+
+## Intraday Alert Contents
+
+Intraday alerts can include:
+
+- Entry mode and direction
+- AI score and ranking score
+- AI confidence with historical adjustment
+- Setup quality and timing
+- ETF/market bias
+- Intraday confirmation count
+- Historical win rate and forecast accuracy
+- Entry, stop, target, and risk/reward
+- VWAP, EMA, ORB, premarket, and prior-day levels
+- Retest status and late-breakout risk
+- Rule reasons and AI narrative
+
+## Swing Alert Example
 
 ```text
 🟢 SWING CALL SETUP: MSFT
@@ -288,20 +398,20 @@ Reasons:
 
 # 🧠 Fibonacci Trading Engine
 
-## ✔ Fibonacci Retracement
+## Fibonacci Retracement
 
 - 38.2%
 - 50%
 - 61.8%
 
-## ✔ Fibonacci Extensions
+## Fibonacci Extensions
 
-- 1.272 → Partial Profit
-- 1.618 → Final Exit
+- 1.272 → Partial profit
+- 1.618 → Final exit
 
-## ✔ Multi-Timeframe Confluence
+## Multi-Timeframe Confluence
 
-Fib levels validated against:
+Fib levels are validated against:
 
 - VWAP
 - EMA21
@@ -323,28 +433,31 @@ Entries require:
 - Trend alignment
 - Risk/reward validation
 - Multi-timeframe alignment
+- Setup-quality filters
+- Chart-structure validation
+- Execution-quality validation
 
 ---
 
 # 💰 Risk Management System
 
-## ✔ Dynamic Position Sizing
+## Dynamic Position Sizing
 
 Automatically calculates:
 
-- position size
-- risk per trade
-- stop placement
-- capital exposure
+- Position size
+- Risk per trade
+- Stop placement
+- Capital exposure
 
----
-
-## ✔ Smart Exit System
+## Smart Exit System
 
 - Partial profit taking
 - ATR trailing stop
 - Dynamic RR management
 - Multi-target exits
+- Theta-risk checks for options
+- AI-assisted hold/trim/exit recommendations
 
 ---
 
@@ -357,19 +470,25 @@ Technical Analysis
       ↓
 Intraday Engine + Swing Engine
       ↓
-Confluence Validation
+Market Regime Detection
       ↓
-AI + ML Scoring
+Multi-Timeframe + Setup Quality Filters
       ↓
-Probability Validation
+AI Reasoning + ML Scoring
       ↓
-Risk Management
+Price Projection
+      ↓
+Probability + Historical Calibration
+      ↓
+Risk / Execution / Options Review
       ↓
 Telegram Alerts
       ↓
 Dashboard Logging
       ↓
-Adaptive Learning
+Outcome Tracking
+      ↓
+Adaptive Learning + Daily Report
 ```
 
 ---
@@ -387,38 +506,48 @@ Intraday Scanner
         ↓
 Professional Swing Scanner
         ↓
+Market Regime Intelligence
+        ↓
 Multi-Timeframe Confirmation
         ↓
+Execution + Setup Quality Filters
+        ↓
+AI Reasoning Engine
+        ↓
 ML Scoring Layers
+        ↓
+Price Projection Engine
         ↓
 Sklearn Probability Model
         ↓
 Trade Ranking Engine
         ↓
 Telegram + Dashboard
+        ↓
+Outcome Tracking + Adaptive Learning
 ```
 
 ---
 
 # 📊 Dashboard Features
 
-## Streamlit Dashboard
+The Streamlit dashboard tracks:
 
-Tracks:
-
-- alerts
+- Alerts
 - ML probabilities
-- win/loss statistics
-- setup performance
-- replay analysis
-- ranking scores
-- swing vs intraday performance
+- Win/loss statistics
+- Setup performance
+- Replay analysis
+- Ranking scores
+- Swing vs intraday performance
+- Setup quality distribution
+- Historical forecast accuracy fields when available
 
 ---
 
-# 🔁 Backtesting & Replay
+# 🔁 Backtesting, Replay & Learning
 
-## Features
+Features:
 
 - Historical replay
 - Outcome tracking
@@ -426,6 +555,8 @@ Tracks:
 - Setup optimization
 - Adaptive learning
 - Swing trade analysis
+- Projection-vs-actual comparison
+- Daily learning reports
 
 ---
 
@@ -435,6 +566,12 @@ Tracks:
 pip install -r requirements.txt
 pip install scikit-learn
 pip install streamlit
+```
+
+Optional browser setup for chart capture:
+
+```bash
+playwright install chromium
 ```
 
 ---
@@ -455,10 +592,11 @@ streamlit run streamlit_dashboard.py
 
 ---
 
-# 🔁 Train ML Models
+# 🔁 Train / Refresh Learning Models
 
 ```bash
 python backtest_replay.py
+python daily_report_engine.py
 ```
 
 ---
@@ -478,24 +616,6 @@ ALPACA_SECRET_KEY=
 
 # 🚀 Next Planned Upgrades
 
-## 🌎 Market Regime Intelligence (HIGH PRIORITY)
-
-Detect:
-
-- trending markets
-- choppy conditions
-- volatility expansion
-- risk-on / risk-off regimes
-
-Then dynamically adapt:
-
-- scoring
-- stop size
-- aggressiveness
-- allowed setups
-
----
-
 ## 📈 Portfolio & Position Management
 
 - Open position tracking
@@ -503,16 +623,12 @@ Then dynamically adapt:
 - Risk balancing
 - Sector concentration limits
 
----
-
 ## 💵 Live PnL Dashboard
 
 - Real-time PnL
 - Trade analytics
-- Win-rate by setup
+- Win rate by setup
 - Daily/weekly performance
-
----
 
 ## 🤖 Auto Trading (Alpaca)
 
@@ -521,16 +637,12 @@ Then dynamically adapt:
 - Dynamic position sizing
 - Stop/target automation
 
----
-
 ## 📰 AI Sentiment Engine
 
 - News sentiment
 - Twitter/X analysis
 - Earnings reaction analysis
 - Macro event filtering
-
----
 
 ## ☁️ Cloud Deployment
 
@@ -543,10 +655,11 @@ Then dynamically adapt:
 
 # ⚠️ Notes
 
-- Requires historical logs for ML improvement
-- Works best during active market sessions
-- Swing analysis can run after-hours
-- Not financial advice
+- Requires historical logs for ML improvement.
+- Works best during active market sessions.
+- Swing analysis can run after hours.
+- Price projections are probabilistic estimates, not guarantees.
+- Not financial advice.
 
 ---
 

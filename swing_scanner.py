@@ -1,4 +1,3 @@
-import datetime as dt
 from typing import Dict
 
 from bot_utils import safe_float
@@ -10,78 +9,73 @@ from config import (
     SWING_ATR_TARGET_MULTIPLIER,
     SWING_HOLD_DAYS_MAX,
     SWING_HOLD_DAYS_MIN,
-    SWING_MIN_REASONS,
-    SWING_MIN_SCORE,
 )
 
 
-def _trend_score(tech: Dict) -> tuple[int, list]:
+def _trend_score(tech: Dict) -> tuple[int, list, str | None]:
     score = 0
     reasons = []
 
-    price = safe_float((tech or {}).get('price'))
-    ema20 = safe_float((tech or {}).get('ema20') or (tech or {}).get('dma20'))
-    ema50 = safe_float((tech or {}).get('ema50') or (tech or {}).get('dma50'))
-    ema200 = safe_float((tech or {}).get('ema200') or (tech or {}).get('dma200'))
-    rsi = safe_float((tech or {}).get('rsi'))
-    adx = safe_float((tech or {}).get('adx'))
-    rel_volume = safe_float((tech or {}).get('rel_volume'))
+    price = safe_float((tech or {}).get("price"))
+    ema20 = safe_float((tech or {}).get("ema20") or (tech or {}).get("dma20"))
+    ema50 = safe_float((tech or {}).get("ema50") or (tech or {}).get("dma50"))
+    ema200 = safe_float((tech or {}).get("ema200") or (tech or {}).get("dma200"))
+    rsi = safe_float((tech or {}).get("rsi"))
+    adx = safe_float((tech or {}).get("adx"))
+    rel_volume = safe_float((tech or {}).get("rel_volume"))
 
-bullish = (
-    price and ema20 and ema50
-    and price > ema20
-    and ema20 > ema50
-)
-
-bearish = (
-    price and ema20 and ema50
-    and price < ema20
-    and ema20 < ema50
-)
+    bullish = bool(price and ema20 and ema50 and price > ema20 and ema20 > ema50)
+    bearish = bool(price and ema20 and ema50 and price < ema20 and ema20 < ema50)
 
     if bullish:
         score += 35
-        reasons.append('Bullish EMA alignment')
+        reasons.append("Bullish EMA alignment")
+        if ema200 and price > ema200:
+            score += 10
+            reasons.append("Price above 200-day trend")
 
     if bearish:
         score += 35
-        reasons.append('Bearish EMA alignment')
+        reasons.append("Bearish EMA alignment")
+        if ema200 and price < ema200:
+            score += 10
+            reasons.append("Price below 200-day trend")
 
     if 55 <= rsi <= 75:
         score += 15
-        reasons.append(f'RSI healthy {rsi:.1f}')
+        reasons.append(f"RSI healthy {rsi:.1f}")
+    elif 25 <= rsi <= 45 and bearish:
+        score += 15
+        reasons.append(f"Bearish RSI pressure {rsi:.1f}")
 
     if adx >= 20:
         score += 15
-        reasons.append(f'Strong ADX {adx:.1f}')
+        reasons.append(f"Strong ADX {adx:.1f}")
 
     if rel_volume >= 1.5:
         score += 15
-        reasons.append(f'Strong RVOL {rel_volume:.1f}x')
+        reasons.append(f"Strong RVOL {rel_volume:.1f}x")
 
-    direction = 'CALL' if bullish else 'PUT' if bearish else None
-
+    direction = "CALL" if bullish else "PUT" if bearish else None
     return score, reasons, direction
 
 
 def score_swing_setup(tech: Dict):
     tech = tech or {}
-
     score, reasons, direction = _trend_score(tech)
 
     if not direction:
         return None
 
-    atr = safe_float(tech.get('atr14') or tech.get('atr'))
-    price = safe_float(tech.get('price'))
+    price = safe_float(tech.get("price"))
+    if not price:
+        return None
 
-if not price:
-    return None
+    atr = safe_float(tech.get("atr14") or tech.get("atr"))
+    if not atr:
+        atr = max(price * 0.015, 1)
 
-if not atr:
-    atr = max(price * 0.015, 1)
-
-    if direction == 'CALL':
+    if direction == "CALL":
         stop = round(price - (atr * SWING_ATR_STOP_MULTIPLIER), 2)
         target = round(price + (atr * SWING_ATR_TARGET_MULTIPLIER), 2)
     else:
@@ -90,62 +84,64 @@ if not atr:
 
     risk = abs(price - stop)
     reward = abs(target - price)
-
     rr = round(reward / risk, 2) if risk else 0
 
-if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
-    return None
+    if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
+        return None
 
-if len(reasons) < 2:
-    return None
+    if len(reasons) < 2:
+        return None
 
-if score < 45:
-    return None
-    
-    tier = 'A+'
+    if score < 45:
+        return None
+
+    tier = "A+"
     if score < SWING_A_PLUS_SCORE:
-        tier = 'A'
+        tier = "A"
     if score < SWING_A_SCORE:
-        tier = 'WATCH'
+        tier = "WATCH"
 
     return {
-        'direction': direction,
-        'score': score,
-        'tier': tier,
-        'entry': round(price, 2),
-        'stop': stop,
-        'target': target,
-        'risk_reward': rr,
-        'hold_days': max(SWING_HOLD_DAYS_MIN, min(SWING_HOLD_DAYS_MAX, 5)),
-        'reasons': reasons,
+        "direction": direction,
+        "score": score,
+        "tier": tier,
+        "entry": round(price, 2),
+        "stop": stop,
+        "target": target,
+        "risk_reward": rr,
+        "hold_days": max(SWING_HOLD_DAYS_MIN, min(SWING_HOLD_DAYS_MAX, 5)),
+        "reasons": reasons,
     }
 
 
 def format_swing_alert(ticker: str, setup: Dict) -> str:
     setup = setup or {}
 
-    emoji = '🟢' if setup.get('direction') == 'CALL' else '🔴'
+    emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
+    probability = setup.get("ml_probability")
+    reasoning = setup.get("ai_reasoning") or {}
+    narrative = reasoning.get("narrative", "")
 
-    probability = setup.get('ml_probability')
+    regime = (reasoning.get("regime") or {}).get("regime", "UNKNOWN")
+    mtf = (reasoning.get("mtf") or {}).get("structure", "UNKNOWN")
+    execution = (reasoning.get("execution") or {}).get("quality", "UNKNOWN")
+    vision = (reasoning.get("vision") or {}).get("quality", "UNKNOWN")
+    learning_confidence = reasoning.get("learning_confidence") or {}
+    learning_stats = learning_confidence.get("learning_stats") or {}
 
-    reasoning = setup.get('ai_reasoning') or {}
-
-    narrative = reasoning.get('narrative', '')
-
-    regime = (reasoning.get('regime') or {}).get('regime', 'UNKNOWN')
-    mtf = (reasoning.get('mtf') or {}).get('structure', 'UNKNOWN')
-    execution = (reasoning.get('execution') or {}).get('quality', 'UNKNOWN')
-    vision = (reasoning.get('vision') or {}).get('quality', 'UNKNOWN')
-
-    prob_line = (
-        f'🧠 ML Probability: {probability}\n'
-        if probability is not None else ''
+    prob_line = f"🧠 ML Probability: {probability}\n" if probability is not None else ""
+    history_line = (
+        f"📚 History: WR {float(learning_stats.get('win_rate', 0)) * 100:.1f}% | "
+        f"Forecast {float(learning_stats.get('forecast_accuracy', 0)) * 100:.1f}% | "
+        f"Confidence {setup.get('calibrated_confidence', setup.get('score', 0))}% "
+        f"({setup.get('confidence_adjustment', 0):+.1f})\n"
     )
 
     return (
         f'{emoji} *{setup.get("tier", "WATCH")} SWING {setup.get("direction", "CALL")} SETUP: {ticker}*\n'
         f'⭐ Score: {setup.get("score", 0)}/100\n'
         f'{prob_line}'
+        f'{history_line}'
         f'⏳ Hold: {setup.get("hold_days", "?")} days\n'
         f'🎯 Entry: {setup.get("entry", "?")}\n'
         f'🛑 Stop: {setup.get("stop", "?")}\n'

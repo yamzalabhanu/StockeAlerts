@@ -162,12 +162,19 @@ def process_swing_candidate(bot, ticker, tech):
     except Exception as e:
         print(f"{ticker}: swing historical prioritization skipped: {e}")
 
+    telegram_sent = False
     try:
         message = format_swing_alert(ticker, setup)
-        bot.send_telegram_msg(message)
-        SWING_ALERT_CACHE[ticker] = now
+        telegram_sent = bool(bot.send_telegram_msg(message))
+        if telegram_sent:
+            SWING_ALERT_CACHE[ticker] = now
+        else:
+            print(f"{ticker}: swing telegram send failed; alert not counted as sent")
     except Exception as e:
         print(f"{ticker}: swing telegram error: {e}")
+
+    if not telegram_sent:
+        return None
 
     log_swing_alert(ticker, setup, tech)
 

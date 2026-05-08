@@ -1,5 +1,5 @@
 import datetime as dt
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from bot_utils import safe_float
 from config import (
@@ -10,99 +10,31 @@ from config import (
     SWING_ATR_TARGET_MULTIPLIER,
     SWING_HOLD_DAYS_MAX,
     SWING_HOLD_DAYS_MIN,
-    SWING_MIN_REASONS,
-    SWING_MIN_SCORE,
-    SWING_PULLBACK_TOLERANCE_PCT,
 )
 
-def _trend_score(tech: Dict) -> tuple[int, list]:
-    score = 0
-    reasons = []
 
-    price = safe_float((tech or {}).get('price'))
-    ema20 = safe_float((tech or {}).get('ema20') or (tech or {}).get('dma20'))
-    ema50 = safe_float((tech or {}).get('ema50') or (tech or {}).get('dma50'))
-    ema200 = safe_float((tech or {}).get('ema200') or (tech or {}).get('dma200'))
-    rsi = safe_float((tech or {}).get('rsi'))
-    adx = safe_float((tech or {}).get('adx'))
-    rel_volume = safe_float((tech or {}).get('rel_volume'))
-
-bullish = (
-    price and ema20 and ema50
-    and price > ema20
-    and ema20 > ema50
-)
-
-bearish = (
-    price and ema20 and ema50
-    and price < ema20
-    and ema20 < ema50
-)
-
-    if bullish:
-        score += 35
-        reasons.append('Bullish EMA alignment')
-
-    if bearish:
-        score += 35
-        reasons.append('Bearish EMA alignment')
-
-    if 55 <= rsi <= 75:
-        score += 15
-        reasons.append(f'RSI healthy {rsi:.1f}')
-
-    if adx >= 20:
-        score += 15
-        reasons.append(f'Strong ADX {adx:.1f}')
-
-    if rel_volume >= 1.5:
-        score += 15
-        reasons.append(f'Strong RVOL {rel_volume:.1f}x')
-
-    direction = 'CALL' if bullish else 'PUT' if bearish else None
-
-    return score, reasons, direction
-
-
-def score_swing_setup(tech: Dict):
-    tech = tech or {}
-
-    score, reasons, direction = _trend_score(tech)
-
-    if not direction:
-
+def _ema(values, length):
+    if not values or len(values) < length:
         return None
 
-
-
-if not price:
-    return None
-
-if not atr:
-    atr = max(price * 0.015, 1)
-
-
     k = 2 / (length + 1)
-
     ema_val = sum(values[:length]) / length
 
-    for price in values[length:]:
-        ema_val = price * k + ema_val * (1 - k)
+    for v in values[length:]:
+        ema_val = v * k + ema_val * (1 - k)
 
     return ema_val
 
 
 def _rsi(values, length=14):
-    values = _safe_list(values)
-
-    if len(values) < length + 1:
+    if not values or len(values) < length + 1:
         return None
 
-    gains, losses = [], []
+    gains = []
+    losses = []
 
     for i in range(1, len(values)):
         delta = values[i] - values[i - 1]
-
         gains.append(max(delta, 0))
         losses.append(abs(min(delta, 0)))
 
@@ -113,382 +45,78 @@ def _rsi(values, length=14):
         return 100
 
     rs = avg_gain / avg_loss
-
     return 100 - (100 / (1 + rs))
 
 
-def _macd(values):
-    values = _safe_list(values)
+def _trend_score(tech: Dict):
+    score = 0
+    reasons = []
 
-    if len(values) < 35:
-        return None, None, None
+    price = safe_float((tech or {}).get("price"))
+    ema20 = safe_float((tech or {}).get("ema20") or (tech or {}).get("dma20"))
+    ema50 = safe_float((tech or {}).get("ema50") or (tech or {}).get("dma50"))
+    ema200 = safe_float((tech or {}).get("ema200") or (tech or {}).get("dma200"))
+    rsi = safe_float((tech or {}).get("rsi"))
+    adx = safe_float((tech or {}).get("adx"))
+    rel_volume = safe_float((tech or {}).get("rel_volume"))
 
-    ema12_series = []
-    ema26_series = []
+    bullish = (
+        price > ema20 > ema50 > ema200
+        if all([price, ema20, ema50, ema200])
+        else False
+    )
 
-    for i in range(len(values)):
-        ema12_series.append(_ema(values[: i + 1], 12))
-        ema26_series.append(_ema(values[: i + 1], 26))
+    bearish = (
+        price < ema20 < ema50 < ema200
+        if all([price, ema20, ema50, ema200])
+        else False
+    )
 
-    macd_series = [
-        a - b
-        for a, b in zip(ema12_series, ema26_series)
-        if a is not None and b is not None
-    ]
+    if bullish:
+        score += 35
+        reasons.append("Bullish EMA alignment")
 
-    if len(macd_series) < 9:
-        return None, None, None
+    if bearish:
+        score += 35
+        reasons.append("Bearish EMA alignment")
 
-    signal = _ema(macd_series, 9)
-    macd_val = macd_series[-1]
-    hist = macd_val - signal if signal is not None else None
-
-    return macd_val, signal, hist
-
-
-def _trend_strength_score(direction, tech, price, ema20, ema50, sma200):
-    score, reasons = 0, []
-
-    if direction == "CALL":
-        if ema20 and price > ema20:
-            score += 10
-            reasons.append("price above 20 EMA")
-
-        if ema50 and price > ema50:
-            score += 10
-            reasons.append("price above 50 EMA")
-
-        if sma200 and price > sma200:
-            score += 10
-            reasons.append("price above 200 SMA")
-
-        if ema20 and ema50 and ema20 > ema50:
-            score += 10
-            reasons.append("20 EMA above 50 EMA")
-
-        if ema50 and sma200 and ema50 > sma200:
-            score += 10
-            reasons.append("50 EMA above 200 SMA")
-
-    else:
-        if ema20 and price < ema20:
-            score += 10
-            reasons.append("price below 20 EMA")
-
-        if ema50 and price < ema50:
-            score += 10
-            reasons.append("price below 50 EMA")
-
-        if sma200 and price < sma200:
-            score += 10
-            reasons.append("price below 200 SMA")
-
-        if ema20 and ema50 and ema20 < ema50:
-            score += 10
-            reasons.append("20 EMA below 50 EMA")
-
-        if ema50 and sma200 and ema50 < sma200:
-            score += 10
-            reasons.append("50 EMA below 200 SMA")
-
-    return score, reasons
-
-
-def _rsi_score(direction, rsi):
-    if rsi is None:
-        return 0, []
-
-    score, reasons = 0, []
-
-    if direction == "CALL":
-        if 55 <= rsi <= 70:
-            score += 15
-            reasons.append(f"RSI ideal bullish zone {rsi:.1f}")
-
-        elif 40 <= rsi < 55:
-            score += 8
-            reasons.append(f"RSI bounce zone {rsi:.1f}")
-
-        elif rsi > 80:
-            score -= 10
-            reasons.append(f"RSI overextended {rsi:.1f}")
-
-        elif rsi < 40:
-            score -= 8
-            reasons.append(f"RSI weak {rsi:.1f}")
-
-    else:
-        if 30 <= rsi <= 45:
-            score += 15
-            reasons.append(f"RSI bearish momentum zone {rsi:.1f}")
-
-        elif 45 < rsi <= 60:
-            score += 8
-            reasons.append(f"RSI rejection zone {rsi:.1f}")
-
-        elif rsi > 65:
-            score -= 8
-            reasons.append(f"RSI too strong for puts {rsi:.1f}")
-
-    return score, reasons
-
-
-def _volume_score(tech):
-    avg_vol = safe_float(tech.get("avg_20_volume"))
-    cur_vol = safe_float(tech.get("current_volume"))
-    rel_vol = safe_float(tech.get("rel_volume"))
-
-    if not rel_vol and avg_vol and cur_vol:
-        rel_vol = cur_vol / avg_vol
-
-    score, reasons = 0, []
-
-    if not rel_vol:
-        return 0, []
-
-    if rel_vol >= 3:
-        score += 20
-        reasons.append(f"institutional volume {rel_vol:.1f}x")
-
-    elif rel_vol >= 2:
+    if 55 <= rsi <= 75:
         score += 15
-        reasons.append(f"strong volume {rel_vol:.1f}x")
+        reasons.append(f"RSI healthy {rsi:.1f}")
 
-    elif rel_vol >= 1.5:
-        score += 10
-        reasons.append(f"volume confirmation {rel_vol:.1f}x")
+    if adx >= 20:
+        score += 15
+        reasons.append(f"Strong ADX {adx:.1f}")
 
-    elif rel_vol < 0.7:
-        score -= 8
-        reasons.append(f"weak volume {rel_vol:.1f}x")
+    if rel_volume >= 1.5:
+        score += 15
+        reasons.append(f"Strong RVOL {rel_volume:.1f}x")
 
-    return score, reasons
+    direction = "CALL" if bullish else "PUT" if bearish else None
 
-
-def _macd_score(direction, macd_val, signal, hist):
-    if macd_val is None or signal is None or hist is None:
-        return 0, []
-
-    score, reasons = 0, []
-
-    if direction == "CALL":
-        if macd_val > signal:
-            score += 10
-            reasons.append("MACD bullish cross")
-
-        if hist > 0:
-            score += 5
-            reasons.append("MACD histogram positive")
-
-        if macd_val > 0:
-            score += 5
-            reasons.append("MACD above zero")
-
-    else:
-        if macd_val < signal:
-            score += 10
-            reasons.append("MACD bearish cross")
-
-        if hist < 0:
-            score += 5
-            reasons.append("MACD histogram negative")
-
-        if macd_val < 0:
-            score += 5
-            reasons.append("MACD below zero")
-
-    return score, reasons
+    return score, reasons, direction
 
 
-def _adx_proxy_score(tech, ema20, ema50):
-    adx = tech.get("adx")
+def score_swing_setup(tech: Dict):
+    tech = tech or {}
 
-    score, reasons = 0, []
+    score, reasons, direction = _trend_score(tech)
 
-    if adx is not None:
-        adx = safe_float(adx)
+    if not direction:
+        return None
 
-        if adx >= 25:
-            score += 10
-            reasons.append(f"ADX strong trend {adx:.1f}")
+    atr = safe_float(tech.get("atr14") or tech.get("atr"))
+    price = safe_float(tech.get("price"))
 
-        elif adx >= 20:
-            score += 6
-            reasons.append(f"ADX trend forming {adx:.1f}")
+    if not price:
+        return None
 
-        elif adx < 18:
-            score -= 10
-            reasons.append(f"ADX chop risk {adx:.1f}")
-
-        return score, reasons
-
-    if ema20 and ema50:
-        spread = abs(_pct_diff(ema20, ema50) or 0)
-
-        if spread >= 1.5:
-            score += 6
-            reasons.append(f"EMA spread trend proxy {spread:.1f}%")
-
-        elif spread < 0.4:
-            score -= 5
-            reasons.append("EMA spread too tight / chop risk")
-
-    return score, reasons
-
-
-def _structure_score(direction, tech, price, ema20, ema50):
-    score, reasons = 0, []
-
-    recent_high = tech.get("recent_high")
-    recent_low = tech.get("recent_low")
-    prev_high = tech.get("prev_high")
-    prev_low = tech.get("prev_low")
-
-    last_lows = _safe_list(tech.get("last_5_lows"))
-    last_highs = _safe_list(tech.get("last_5_highs"))
-
-    if direction == "CALL":
-        resistance = max(
-            [x for x in [recent_high, prev_high] if x] or [0]
-        )
-
-        if resistance and price >= resistance * 0.995:
-            score += 15
-            reasons.append("breakout near/above resistance")
-
-        if ema20 and _near(price, ema20, SWING_PULLBACK_TOLERANCE_PCT):
-            score += 12
-            reasons.append("EMA20 pullback zone")
-
-        if ema50 and _near(price, ema50, SWING_PULLBACK_TOLERANCE_PCT):
-            score += 8
-            reasons.append("EMA50 swing support zone")
-
-    else:
-        support = min(
-            [x for x in [recent_low, prev_low] if x] or [0]
-        )
-
-        if support and price <= support * 1.005:
-            score += 15
-            reasons.append("breakdown near/below support")
-
-        if ema20 and _near(price, ema20, SWING_PULLBACK_TOLERANCE_PCT):
-            score += 12
-            reasons.append("EMA20 rejection zone")
-
-        if ema50 and _near(price, ema50, SWING_PULLBACK_TOLERANCE_PCT):
-            score += 8
-            reasons.append("EMA50 swing rejection zone")
-
-    return score, reasons
-
-
-def _relative_strength_score(direction, tech):
-    rs = str(
-        tech.get("relative_strength", tech.get("rs_vs_spy", ""))
-    ).upper()
-
-    if direction == "CALL" and rs in {
-        "STRONG",
-        "BULLISH",
-        "OUTPERFORM",
-    }:
-        return 10, ["relative strength vs market"]
-
-    if direction == "PUT" and rs in {
-        "WEAK",
-        "BEARISH",
-        "UNDERPERFORM",
-    }:
-        return 10, ["relative weakness vs market"]
-
-    return 0, []
-
-
-def _mtf_trend_score(direction, tech):
-    score, reasons = 0, []
-
-    weekly = str(tech.get("weekly_trend", "")).upper()
-    daily = str(tech.get("daily_trend", "")).upper()
-    h4 = str(tech.get("h4_trend", tech.get("trend_4h", ""))).upper()
-
-    bullish = {"BULLISH", "UP", "UPTREND"}
-    bearish = {"BEARISH", "DOWN", "DOWNTREND"}
-
-    if direction == "CALL":
-        if weekly in bullish:
-            score += 12
-            reasons.append("weekly trend bullish")
-
-        if daily in bullish:
-            score += 10
-            reasons.append("daily structure bullish")
-
-        if h4 in bullish:
-            score += 8
-            reasons.append("4H entry trend aligned")
-
-    else:
-        if weekly in bearish:
-            score += 12
-            reasons.append("weekly trend bearish")
-
-        if daily in bearish:
-            score += 10
-            reasons.append("daily structure bearish")
-
-        if h4 in bearish:
-            score += 8
-            reasons.append("4H entry trend aligned")
-
-    return score, reasons
-
-
-def _score_direction(
-    direction,
-    tech,
-    price,
-    atr,
-    closes,
-) -> Tuple[int, list, float, float, float]:
-
-    ema20 = _ema(closes, 20) or tech.get("dma20")
-    ema50 = _ema(closes, 50) or tech.get("dma50")
-    sma200 = tech.get("dma200")
-
-    rsi = tech.get("rsi") or _rsi(closes, 14)
-
-    macd_val, signal, hist = _macd(closes)
-
-    score, reasons = 0, []
-
-    scoring_blocks = [
-        _trend_strength_score(
-            direction,
-            tech,
-            price,
-            ema20,
-            ema50,
-            sma200,
-        ),
-        _rsi_score(direction, rsi),
-        _volume_score(tech),
-        _macd_score(direction, macd_val, signal, hist),
-        _adx_proxy_score(tech, ema20, ema50),
-        _structure_score(direction, tech, price, ema20, ema50),
-        _relative_strength_score(direction, tech),
-        _mtf_trend_score(direction, tech),
-    ]
-
-    for add_score, add_reasons in scoring_blocks:
-        score += add_score
-        reasons.extend(add_reasons)
+    if not atr:
+        atr = max(price * 0.015, 1)
 
     if direction == "CALL":
         stop = price - atr * SWING_ATR_STOP_MULTIPLIER
         target = price + atr * SWING_ATR_TARGET_MULTIPLIER
-
     else:
         stop = price + atr * SWING_ATR_STOP_MULTIPLIER
         target = price - atr * SWING_ATR_TARGET_MULTIPLIER
@@ -498,21 +126,22 @@ def _score_direction(
 
     rr = reward / risk if risk else 0
 
-if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
-    return None
+    if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
+        return None
 
-if len(reasons) < 2:
-    return None
+    if len(reasons) < 2:
+        return None
 
-if score < 45:
-    return None
-    
-    tier = 'A+'
+    if score < 45:
+        return None
+
+    tier = "A+"
+
     if score < SWING_A_PLUS_SCORE:
-        tier = 'A'
-    if score < SWING_A_SCORE:
-        tier = 'WATCH'
+        tier = "A"
 
+    if score < SWING_A_SCORE:
+        tier = "WATCH"
 
     return {
         "alert_type": "SWING",
@@ -535,11 +164,7 @@ if score < 45:
 def format_swing_alert(ticker: str, setup: Dict) -> str:
     setup = setup or {}
 
-    emoji = (
-        "🟢"
-        if setup.get("direction") == "CALL"
-        else "🔴"
-    )
+    emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
 
     probability = setup.get("ml_probability")
 
@@ -570,21 +195,21 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
     )
 
     return (
-        f'{emoji} *{setup.get("tier", "WATCH")} '
-        f'SWING {setup.get("direction", "CALL")} '
-        f'SETUP: {ticker}*\n'
-        f'⭐ Score: {setup.get("score", 0)}/100\n'
+        f"{emoji} *{setup.get('tier', 'WATCH')} "
+        f"SWING {setup.get('direction', 'CALL')} "
+        f"SETUP: {ticker}*\n"
+        f"⭐ Score: {setup.get('score', 0)}/100\n"
         f"{prob_line}"
-        f'⏳ Hold: {setup.get("hold_days", "?")} days\n'
-        f'🎯 Entry: {setup.get("entry", "?")}\n'
-        f'🛑 Stop: {setup.get("stop", "?")}\n'
-        f'🚀 Target: {setup.get("target", "?")}\n'
-        f'📐 RR: {setup.get("risk_reward", "?")}:1\n'
-        f'📝 Reasons: {", ".join(setup.get("reasons", []))}\n'
-        f'🧠 AI Decision: '
-        f'{reasoning.get("decision", setup.get("tier", "WATCH"))}\n'
-        f'📊 Composite Score: '
-        f'{reasoning.get("final_score", setup.get("score", 0))}/100\n'
+        f"⏳ Hold: {setup.get('hold_days', '?')} days\n"
+        f"🎯 Entry: {setup.get('entry', '?')}\n"
+        f"🛑 Stop: {setup.get('stop', '?')}\n"
+        f"🚀 Target: {setup.get('target', '?')}\n"
+        f"📐 RR: {setup.get('risk_reward', '?')}:1\n"
+        f"📝 Reasons: {', '.join(setup.get('reasons', []))}\n"
+        f"🧠 AI Decision: "
+        f"{reasoning.get('decision', setup.get('tier', 'WATCH'))}\n"
+        f"📊 Composite Score: "
+        f"{reasoning.get('final_score', setup.get('score', 0))}/100\n"
         f"🌍 Regime: {regime}\n"
         f"🧭 MTF: {mtf}\n"
         f"⚡ Execution: {execution}\n"

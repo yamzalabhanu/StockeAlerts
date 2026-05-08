@@ -13,6 +13,27 @@ from config import (
 )
 
 
+<<<<<<< HEAD
+=======
+def _pct_diff(a, b):
+    try:
+        if a is None or b in (None, 0):
+            return None
+        return ((float(a) - float(b)) / float(b)) * 100.0
+    except Exception:
+        return None
+
+
+def _near(price, level, tolerance_pct):
+    diff = _pct_diff(price, level)
+    return diff is not None and abs(diff) <= tolerance_pct
+
+
+def _safe_list(values):
+    return [safe_float(x) for x in (values or []) if x is not None]
+
+
+>>>>>>> b32505341b9ca06d788e06a563d8d05f8284bc80
 def _ema(values, length):
     if not values or len(values) < length:
         return None
@@ -25,6 +46,7 @@ def _ema(values, length):
 
     return ema_val
 
+<<<<<<< HEAD
 
 def _rsi(values, length=14):
     if not values or len(values) < length + 1:
@@ -113,6 +135,81 @@ def score_swing_setup(tech: Dict):
 
     if not atr:
         atr = max(price * 0.015, 1)
+=======
+def score_swing_setup(tech: Dict):
+    tech = tech or {}
+    score, reasons, direction = _trend_score(tech)
+
+    if len(values) < length + 1:
+        return None
+
+    price = safe_float(tech.get("price"))
+    if not price:
+        return None
+
+    atr = safe_float(tech.get("atr14") or tech.get("atr"))
+    if not atr:
+        atr = max(price * 0.015, 1)
+
+    if direction == "CALL":
+        stop = round(price - (atr * SWING_ATR_STOP_MULTIPLIER), 2)
+        target = round(price + (atr * SWING_ATR_TARGET_MULTIPLIER), 2)
+    else:
+        if weekly in bearish:
+            score += 12
+            reasons.append("weekly trend bearish")
+
+        if daily in bearish:
+            score += 10
+            reasons.append("daily structure bearish")
+
+        if h4 in bearish:
+            score += 8
+            reasons.append("4H entry trend aligned")
+
+    return score, reasons
+
+
+def _score_direction(
+    direction,
+    tech,
+    price,
+    atr,
+    closes,
+) -> Tuple[int, list, float, float, float]:
+
+    ema20 = _ema(closes, 20) or tech.get("dma20")
+    ema50 = _ema(closes, 50) or tech.get("dma50")
+    sma200 = tech.get("dma200")
+
+    rsi = tech.get("rsi") or _rsi(closes, 14)
+
+    macd_val, signal, hist = _macd(closes)
+
+    score, reasons = 0, []
+
+    scoring_blocks = [
+        _trend_strength_score(
+            direction,
+            tech,
+            price,
+            ema20,
+            ema50,
+            sma200,
+        ),
+        _rsi_score(direction, rsi),
+        _volume_score(tech),
+        _macd_score(direction, macd_val, signal, hist),
+        _adx_proxy_score(tech, ema20, ema50),
+        _structure_score(direction, tech, price, ema20, ema50),
+        _relative_strength_score(direction, tech),
+        _mtf_trend_score(direction, tech),
+    ]
+
+    for add_score, add_reasons in scoring_blocks:
+        score += add_score
+        reasons.extend(add_reasons)
+>>>>>>> b32505341b9ca06d788e06a563d8d05f8284bc80
 
     if direction == "CALL":
         stop = price - atr * SWING_ATR_STOP_MULTIPLIER
@@ -123,8 +220,7 @@ def score_swing_setup(tech: Dict):
 
     risk = abs(price - stop)
     reward = abs(target - price)
-
-    rr = reward / risk if risk else 0
+    rr = round(reward / risk, 2) if risk else 0
 
     if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
         return None
@@ -144,20 +240,15 @@ def score_swing_setup(tech: Dict):
         tier = "WATCH"
 
     return {
-        "alert_type": "SWING",
-        "tier": tier,
         "direction": direction,
-        "score": min(score, 100),
+        "score": score,
+        "tier": tier,
         "entry": round(price, 2),
-        "stop": round(stop, 2),
-        "target": round(target, 2),
-        "risk_reward": round(rr, 2),
-        "hold_days": f"{SWING_HOLD_DAYS_MIN}-{SWING_HOLD_DAYS_MAX}",
-        "timeframe": "Weekly / Daily / 4H",
-        "reasons": reasons[:10],
-        "created_at": dt.datetime.now(
-            dt.timezone.utc
-        ).isoformat(),
+        "stop": stop,
+        "target": target,
+        "risk_reward": rr,
+        "hold_days": max(SWING_HOLD_DAYS_MIN, min(SWING_HOLD_DAYS_MAX, 5)),
+        "reasons": reasons,
     }
 
 
@@ -167,49 +258,42 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
     emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
 
     probability = setup.get("ml_probability")
-
     reasoning = setup.get("ai_reasoning") or {}
-
     narrative = reasoning.get("narrative", "")
 
-    regime = (
-        reasoning.get("regime") or {}
-    ).get("regime", "UNKNOWN")
+    regime = (reasoning.get("regime") or {}).get("regime", "UNKNOWN")
+    mtf = (reasoning.get("mtf") or {}).get("structure", "UNKNOWN")
+    execution = (reasoning.get("execution") or {}).get("quality", "UNKNOWN")
+    vision = (reasoning.get("vision") or {}).get("quality", "UNKNOWN")
+    learning_confidence = reasoning.get("learning_confidence") or {}
+    learning_stats = learning_confidence.get("learning_stats") or {}
 
-    mtf = (
-        reasoning.get("mtf") or {}
-    ).get("structure", "UNKNOWN")
-
-    execution = (
-        reasoning.get("execution") or {}
-    ).get("quality", "UNKNOWN")
-
-    vision = (
-        reasoning.get("vision") or {}
-    ).get("quality", "UNKNOWN")
-
-    prob_line = (
-        f"🧠 ML Probability: {probability}\n"
-        if probability is not None
-        else ""
+    prob_line = f"🧠 ML Probability: {probability}\n" if probability is not None else ""
+    history_line = (
+        f"📚 History: WR {float(learning_stats.get('win_rate', 0)) * 100:.1f}% | "
+        f"Forecast {float(learning_stats.get('forecast_accuracy', 0)) * 100:.1f}% | "
+        f"Confidence {setup.get('calibrated_confidence', setup.get('score', 0))}% "
+        f"({setup.get('confidence_adjustment', 0):+.1f})\n"
     )
 
     return (
-        f"{emoji} *{setup.get('tier', 'WATCH')} "
-        f"SWING {setup.get('direction', 'CALL')} "
-        f"SETUP: {ticker}*\n"
-        f"⭐ Score: {setup.get('score', 0)}/100\n"
-        f"{prob_line}"
-        f"⏳ Hold: {setup.get('hold_days', '?')} days\n"
-        f"🎯 Entry: {setup.get('entry', '?')}\n"
-        f"🛑 Stop: {setup.get('stop', '?')}\n"
-        f"🚀 Target: {setup.get('target', '?')}\n"
-        f"📐 RR: {setup.get('risk_reward', '?')}:1\n"
-        f"📝 Reasons: {', '.join(setup.get('reasons', []))}\n"
-        f"🧠 AI Decision: "
-        f"{reasoning.get('decision', setup.get('tier', 'WATCH'))}\n"
-        f"📊 Composite Score: "
-        f"{reasoning.get('final_score', setup.get('score', 0))}/100\n"
+
+        f'{emoji} *{setup.get("tier", "WATCH")} '
+        f'SWING {setup.get("direction", "CALL")} '
+        f'SETUP: {ticker}*\n'
+        f'⭐ Score: {setup.get("score", 0)}/100\n'
+        f'{prob_line}'
+        f'{history_line}'
+        f'⏳ Hold: {setup.get("hold_days", "?")} days\n'
+        f'🎯 Entry: {setup.get("entry", "?")}\n'
+        f'🛑 Stop: {setup.get("stop", "?")}\n'
+        f'🚀 Target: {setup.get("target", "?")}\n'
+        f'📐 RR: {setup.get("risk_reward", "?")}:1\n'
+        f'📝 Reasons: {", ".join(setup.get("reasons", []))}\n'
+        f'🧠 AI Decision: '
+        f'{reasoning.get("decision", setup.get("tier", "WATCH"))}\n'
+        f'📊 Composite Score: '
+        f'{reasoning.get("final_score", setup.get("score", 0))}/100\n'
         f"🌍 Regime: {regime}\n"
         f"🧭 MTF: {mtf}\n"
         f"⚡ Execution: {execution}\n"

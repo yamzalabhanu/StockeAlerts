@@ -14,6 +14,9 @@ from outcome_tracker import track_outcome
 from chart_capture import capture_chart
 from intraday_confirm import intraday_confirmation
 from ai_scoring import ai_score_setup
+from ai_reasoning_engine import build_reasoning_report
+from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
+from daily_report_engine import send_daily_learning_report
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -29,7 +32,7 @@ def log_alert(row: Dict[str, Any]):
 
     fields = [
         "timestamp", "ticker", "direction", "entry_mode", "score", "rule_score", "ranking_score",
-        "ai_verdict", "ai_confidence", "setup_quality", "entry_timing",
+        "ai_verdict", "ai_confidence", "calibrated_confidence", "confidence_adjustment", "setup_quality", "entry_timing",
         "entry", "stop", "target", "risk_reward",
         "retest_confirmed", "late_breakout_risk", "ai_reason",
         "price", "vwap", "ema9", "ema21", "ema50",
@@ -38,7 +41,7 @@ def log_alert(row: Dict[str, Any]):
         "premarket_high", "premarket_low", "prev_high", "prev_low",
         "current_volume", "avg_20_volume",
         "intraday_confirmations", "intraday_required", "intraday_reason",
-        "market_bias", "market_details", "reasons",
+        "market_bias", "market_details", "market_regime", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons",
     ]
 
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
@@ -323,6 +326,21 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         best["entry_mode_reason"] = mode_reason
         print(f"{ticker}: entry_mode={entry_mode} - {mode_reason}")
 
+        try:
+            reasoning = build_reasoning_report(
+                ticker=ticker,
+                setup=best,
+                tech=tech,
+                bot=self,
+                trade_type="INTRADAY",
+            ) or {}
+            best["ai_reasoning"] = reasoning
+            best["score"] = reasoning.get("final_score", best.get("score", 0))
+        except Exception as e:
+            print(f"{ticker}: reasoning learning skipped: {e}")
+            reasoning = {}
+            best["ai_reasoning"] = {}
+
         if best["score"] >= 90:
             try:
                 chart_path = await capture_chart(ticker, f"{ticker}.png")
@@ -332,6 +350,19 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 ai = self.ask_ai_decision(ticker, best, tech, intraday_info, entry_mode, mode_reason)
         else:
             ai = self.ask_ai_decision(ticker, best, tech, intraday_info, entry_mode, mode_reason)
+
+        learning_context = (best.get("ai_reasoning") or {}).get("learning_context") or {
+            "alert_type": "INTRADAY",
+            "entry_mode": entry_mode,
+            "direction": best.get("direction"),
+        }
+        learning_context.setdefault("setup_key", setup_structure_key(learning_context))
+        confidence_learning = calibrate_confidence(ai.get("confidence", 0), learning_context)
+        ai["base_confidence"] = confidence_learning["base_confidence"]
+        ai["confidence"] = confidence_learning["calibrated_confidence"]
+        ai["confidence_adjustment"] = confidence_learning["confidence_adjustment"]
+        ai["learning_key"] = confidence_learning["learning_key"]
+        ai["learning_stats"] = confidence_learning["learning_stats"]
 
         passes, gate_reason = self.ai_passes_gate(ai, best, intraday_info, entry_mode)
         if not passes:
@@ -348,6 +379,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             ranking_score += 15
         if intraday_info.get("confirmations", 0) >= 3:
             ranking_score += 10
+        historical_priority_bonus = priority_bonus(learning_context)
+        ranking_score += historical_priority_bonus
         if best.get("retest_confirmed"):
             ranking_score += 10
 
@@ -360,6 +393,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "entry_mode": entry_mode,
             "mode_reason": mode_reason,
             "ranking_score": ranking_score,
+            "learning_context": learning_context,
+            "historical_priority_bonus": historical_priority_bonus,
         }
 
     async def check_ticker(self, ticker):
@@ -378,6 +413,12 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         market = self.get_market_bias()
         alert_time = dt.datetime.now(dt.timezone.utc).isoformat()
         intraday_info = intraday_info or {}
+        reasoning = setup.get("ai_reasoning") or {}
+        learning_context = reasoning.get("learning_context") or {}
+        learning_confidence = reasoning.get("learning_confidence") or {}
+        learning_stats = ai.get("learning_stats") or learning_confidence.get("learning_stats") or {}
+        priority = reasoning.get("priority_bonus", 0)
+        setup_key = learning_context.get("setup_key") or setup_structure_key({"alert_type": "INTRADAY", "entry_mode": entry_mode, "direction": direction})
 
         msg = (
             f"{emoji} *{entry_mode} {direction} SETUP: {ticker}*\n"
@@ -387,10 +428,11 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"⭐ *AI Score:* {setup['score']}/100 | *Rule:* {setup.get('rule_score')}\n"
             f"🏅 *Rank Score:* {ranking_score:.1f}\n"
             f"🎯 *Mode:* {entry_mode} — {mode_reason}\n"
-            f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%)\n"
+            f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%) | Hist Adj {ai.get('confidence_adjustment', 0):+.1f}\n"
             f"🏆 *Quality:* {ai['setup_quality']} | *Timing:* {ai['entry_timing']}\n"
             f"🌎 *ETF Bias:* {market['bias']} ({market['bullish_count']} bull / {market['bearish_count']} bear)\n"
-            f"📊 *Intraday:* {intraday_info.get('confirmations')}/{intraday_info.get('required_confirmations')} | {intraday_info.get('reason')}\n\n"
+            f"📊 *Intraday:* {intraday_info.get('confirmations')}/{intraday_info.get('required_confirmations')} | {intraday_info.get('reason')}\n"
+            f"📚 *History:* WR {float(learning_stats.get('win_rate', 0)) * 100:.1f}% | Forecast {float(learning_stats.get('forecast_accuracy', 0)) * 100:.1f}% | Priority {priority:+.1f}\n\n"
             f"🎯 *Entry:* {fmt_price(ai['entry'])}\n"
             f"🛑 *Stop:* {fmt_price(ai['stop'])}\n"
             f"🚀 *Target:* {fmt_price(ai['target'])}\n"
@@ -421,6 +463,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "ranking_score": ranking_score,
             "ai_verdict": ai["verdict"],
             "ai_confidence": ai["confidence"],
+            "calibrated_confidence": ai.get("confidence"),
+            "confidence_adjustment": ai.get("confidence_adjustment"),
             "setup_quality": ai["setup_quality"],
             "entry_timing": ai["entry_timing"],
             "entry": ai["entry"],
@@ -454,6 +498,14 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "intraday_reason": intraday_info.get("reason"),
             "market_bias": market["bias"],
             "market_details": ", ".join(market["details"]),
+            "market_regime": (reasoning.get("regime") or {}).get("regime"),
+            "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
+            "chart_structure": (reasoning.get("vision") or {}).get("quality"),
+            "setup_key": setup_key,
+            "learning_key": ai.get("learning_key") or learning_confidence.get("learning_key"),
+            "learning_win_rate": learning_stats.get("win_rate"),
+            "forecast_accuracy": learning_stats.get("forecast_accuracy"),
+            "priority_bonus": priority,
             "reasons": ", ".join(setup.get("reasons", [])),
         })
 
@@ -465,15 +517,47 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 stop=float(ai["stop"]),
                 target=float(ai["target"]),
                 alert_time_iso=alert_time,
+                alert_type="INTRADAY",
+                entry_mode=entry_mode,
+                setup_context={
+                    "setup_key": setup_key,
+                    "market_regime": (reasoning.get("regime") or {}).get("regime"),
+                    "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
+                    "chart_structure": (reasoning.get("vision") or {}).get("quality"),
+                    "ai_confidence": ai.get("base_confidence"),
+                    "calibrated_confidence": ai.get("confidence"),
+                    "score": setup.get("score"),
+                },
             )
             if outcome:
                 print(f"{ticker}: outcome={outcome['result']} max_gain={outcome['max_gain_pct']}% max_loss={outcome['max_loss_pct']}%")
+
+    def maybe_send_daily_learning_report(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        if now.hour < 21:
+            return
+
+        sent_for = getattr(self, "_daily_learning_report_sent_for", None)
+        if sent_for == now.date().isoformat():
+            return
+
+        try:
+            send_daily_learning_report(self)
+            self._daily_learning_report_sent_for = now.date().isoformat()
+        except Exception as e:
+            print(f"Daily learning report skipped: {e}")
+
 
     async def run(self):
         print("🚀 Stock Technical AI Bot Running")
 
         while True:
-            try:
+
+            if not self.is_regular_market_hours() or not self.is_quality_trading_window():
+                self.maybe_send_daily_learning_report()
+                print("⏸ Outside quality market window | sleeping 600s")
+                await asyncio.sleep(600)
+                continue
 
                 outside_intraday = (
                     not self.is_regular_market_hours()

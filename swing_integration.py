@@ -9,6 +9,8 @@ from config import (
 )
 from swing_scanner import score_swing_setup, format_swing_alert
 from ai_reasoning_engine import build_reasoning_report
+from outcome_tracker import track_outcome
+from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 
 SWING_ALERT_CACHE = {}
 
@@ -20,8 +22,14 @@ def log_swing_alert(ticker, setup, tech):
     fields = [
         "timestamp", "ticker", "alert_type", "direction", "entry_mode", "score",
         "ml_probability", "entry", "stop", "target", "risk_reward", "hold_days",
-        "price", "dma20", "dma50", "dma200", "atr14", "reasons",
+        "price", "dma20", "dma50", "dma200", "atr14", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons",
     ]
+
+    reasoning = setup.get("ai_reasoning") or {}
+    learning_context = reasoning.get("learning_context") or {}
+    learning_confidence = reasoning.get("learning_confidence") or {}
+    learning_stats = learning_confidence.get("learning_stats") or {}
+    setup_key = learning_context.get("setup_key") or setup_structure_key({"alert_type": "SWING", "entry_mode": "SWING", "direction": setup.get("direction")})
 
     row = {
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -41,6 +49,11 @@ def log_swing_alert(ticker, setup, tech):
         "dma50": tech.get("dma50"),
         "dma200": tech.get("dma200"),
         "atr14": tech.get("atr14"),
+        "setup_key": setup_key,
+        "learning_key": learning_confidence.get("learning_key"),
+        "learning_win_rate": learning_stats.get("win_rate"),
+        "forecast_accuracy": learning_stats.get("forecast_accuracy"),
+        "priority_bonus": reasoning.get("priority_bonus"),
         "reasons": ", ".join(setup.get("reasons", [])),
     }
 
@@ -65,7 +78,6 @@ def process_swing_candidate(bot, ticker, tech):
         remaining = int((SWING_ALERT_COOLDOWN_SEC - (now - last_alert)) / 60)
         print(f"{ticker}: swing cooldown active ({remaining}m remaining)")
         return None
-
 
     try:
         setup = score_swing_setup(tech)
@@ -96,6 +108,11 @@ def process_swing_candidate(bot, ticker, tech):
         setup["ai_reasoning"] = reasoning
         setup["score"] = reasoning.get("final_score", setup.get("score", 0))
         setup["decision"] = reasoning.get("decision", setup.get("tier", "WATCH"))
+        learning_context = reasoning.get("learning_context") or {"alert_type": "SWING", "entry_mode": "SWING", "direction": setup.get("direction")}
+        confidence_learning = calibrate_confidence(setup.get("score", 0), learning_context)
+        setup["calibrated_confidence"] = confidence_learning.get("calibrated_confidence")
+        setup["confidence_adjustment"] = confidence_learning.get("confidence_adjustment")
+        setup["historical_priority_bonus"] = priority_bonus(learning_context)
 
     except Exception as e:
         print(f"{ticker}: reasoning engine error: {e}")
@@ -118,6 +135,13 @@ def process_swing_candidate(bot, ticker, tech):
         print(f"{ticker}: swing ML skipped: {e}")
 
     try:
+        reasoning = setup.get("ai_reasoning") or {}
+        learning_context = reasoning.get("learning_context") or {"alert_type": "SWING", "entry_mode": "SWING", "direction": setup.get("direction")}
+        setup["score"] = round(max(0, min(100, float(setup.get("score", 0) or 0) + priority_bonus(learning_context))), 2)
+    except Exception as e:
+        print(f"{ticker}: swing historical prioritization skipped: {e}")
+
+    try:
         message = format_swing_alert(ticker, setup)
         bot.send_telegram_msg(message)
         SWING_ALERT_CACHE[ticker] = now
@@ -125,5 +149,32 @@ def process_swing_candidate(bot, ticker, tech):
         print(f"{ticker}: swing telegram error: {e}")
 
     log_swing_alert(ticker, setup, tech)
+
+    try:
+        alert_time = dt.datetime.now(dt.timezone.utc).isoformat()
+        reasoning = setup.get("ai_reasoning") or {}
+        learning_context = reasoning.get("learning_context") or {}
+        track_outcome(
+            ticker=ticker,
+            direction=setup.get("direction"),
+            entry=float(setup.get("entry")),
+            stop=float(setup.get("stop")),
+            target=float(setup.get("target")),
+            alert_time_iso=alert_time,
+            alert_type="SWING",
+            entry_mode="SWING",
+            horizon_minutes=int(setup.get("hold_days", 5) or 5) * 24 * 60,
+            setup_context={
+                "setup_key": learning_context.get("setup_key"),
+                "market_regime": (reasoning.get("regime") or {}).get("regime"),
+                "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
+                "chart_structure": (reasoning.get("vision") or {}).get("quality"),
+                "ai_confidence": setup.get("score"),
+                "calibrated_confidence": setup.get("calibrated_confidence"),
+                "score": setup.get("score"),
+            },
+        )
+    except Exception as e:
+        print(f"{ticker}: swing outcome tracking skipped: {e}")
 
     return setup

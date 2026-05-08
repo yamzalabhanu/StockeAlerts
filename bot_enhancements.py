@@ -10,6 +10,7 @@ from swing_integration import process_swing_candidate
 
 _ORIGINAL_BUILD_CANDIDATE_ATTR = "_original_build_candidate_before_enhancements"
 _ORIGINAL_CHECK_TICKER_ATTR = "_original_check_ticker_before_swing_integration"
+_ORIGINAL_DETECT_ENTRY_MODE_ATTR = "_original_detect_entry_mode_before_enhancements"
 
 
 def learn_from_outcomes(results):
@@ -22,11 +23,19 @@ def apply_enhancements(bot_cls):
 
     original_build_candidate = bot_cls.build_candidate
     original_check_ticker = bot_cls.check_ticker
+    original_detect_entry_mode = bot_cls.detect_entry_mode
     setattr(bot_cls, _ORIGINAL_BUILD_CANDIDATE_ATTR, original_build_candidate)
     setattr(bot_cls, _ORIGINAL_CHECK_TICKER_ATTR, original_check_ticker)
+    setattr(bot_cls, _ORIGINAL_DETECT_ENTRY_MODE_ATTR, original_detect_entry_mode)
 
     def enhanced_detect_entry_mode(self, setup, tech, intraday_info):
-        return "STANDARD", "ML-driven"
+        entry_mode, reason = original_detect_entry_mode(self, setup, tech, intraday_info)
+        adaptive_weight = get_weight(entry_mode)
+        if adaptive_weight:
+            setup["adaptive_weight"] = adaptive_weight
+            setup["score"] = round(max(0, min(100, float(setup.get("score", 0) or 0) + adaptive_weight)), 2)
+            reason = f"{reason}; adaptive setup weight {adaptive_weight:+.1f}"
+        return entry_mode, reason
 
     async def enhanced_build_candidate(self, ticker):
         candidate = await original_build_candidate(self, ticker)

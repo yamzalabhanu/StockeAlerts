@@ -54,17 +54,37 @@ def log_alert(row: Dict[str, Any]):
 class StockTechnicalAIBot(StockTechnicalBase):
     def send_telegram_msg(self, msg):
         if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+            print("Telegram not configured; alert was not sent")
             print(msg)
-            return
+            return False
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        markdown_payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": msg,
+            "parse_mode": "Markdown",
+        }
+        plain_payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg}
 
         try:
-            requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"},
-                timeout=10,
+            response = requests.post(url, data=markdown_payload, timeout=10)
+            if response.ok:
+                return True
+
+            print(f"Telegram Markdown send failed ({response.status_code}): {response.text}")
+            fallback_response = requests.post(url, data=plain_payload, timeout=10)
+            if fallback_response.ok:
+                print("Telegram alert sent without Markdown formatting")
+                return True
+
+            print(
+                "Telegram plain-text send failed "
+                f"({fallback_response.status_code}): {fallback_response.text}"
             )
-        except Exception as e:
+            return False
+        except requests.RequestException as e:
             print(f"Telegram error: {e}")
+            return False
 
     def encode_image(self, path):
         with open(path, "rb") as f:

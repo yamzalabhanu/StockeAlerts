@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 import telegram_alert
+from telegram_formatting import telegram_html_from_markdown
 
 
 class Response:
@@ -12,7 +13,7 @@ class Response:
 
 
 class TelegramAlertTests(unittest.TestCase):
-    def test_send_telegram_falls_back_to_plain_text_when_markdown_fails(self):
+    def test_send_telegram_falls_back_to_plain_text_when_formatted_send_fails(self):
         responses = [
             Response(False, 400, "can't parse entities"),
             Response(True, 200, "OK"),
@@ -25,8 +26,28 @@ class TelegramAlertTests(unittest.TestCase):
 
         self.assertTrue(sent)
         self.assertEqual(post.call_count, 2)
-        self.assertEqual(post.call_args_list[0].kwargs["data"]["parse_mode"], "Markdown")
+        self.assertEqual(post.call_args_list[0].kwargs["data"]["parse_mode"], "HTML")
         self.assertNotIn("parse_mode", post.call_args_list[1].kwargs["data"])
+
+    def test_send_telegram_uses_safe_html_payload_for_dynamic_alert_text(self):
+        with patch.object(telegram_alert, "TOKEN", "token"), \
+            patch.object(telegram_alert, "CHAT_ID", "chat"), \
+            patch("telegram_alert.requests.post", return_value=Response(True)) as post:
+            sent = telegram_alert.send_telegram("*A+ SETUP:* TEST_KEY & <risk> *")
+
+        self.assertTrue(sent)
+        payload = post.call_args.kwargs["data"]
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertEqual(
+            payload["text"],
+            "<b>A+ SETUP:</b> TEST_KEY &amp; &lt;risk&gt; *",
+        )
+
+    def test_markdown_like_bold_is_converted_after_html_escaping(self):
+        self.assertEqual(
+            telegram_html_from_markdown("⭐ *AI Score:* ticker A_B & setup"),
+            "⭐ <b>AI Score:</b> ticker A_B &amp; setup",
+        )
 
     def test_send_telegram_returns_false_when_not_configured(self):
         with patch.object(telegram_alert, "TOKEN", ""), \

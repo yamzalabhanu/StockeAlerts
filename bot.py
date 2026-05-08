@@ -2,6 +2,8 @@ from config import *
 from openai import OpenAI
 
 import requests
+
+from telegram_formatting import html_payload
 import asyncio
 import datetime as dt
 import csv
@@ -59,22 +61,18 @@ class StockTechnicalAIBot(StockTechnicalBase):
             return False
 
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        markdown_payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": msg,
-            "parse_mode": "Markdown",
-        }
+        formatted_payload = html_payload(TELEGRAM_CHAT_ID, msg)
         plain_payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg}
 
         try:
-            response = requests.post(url, data=markdown_payload, timeout=10)
+            response = requests.post(url, data=formatted_payload, timeout=10)
             if response.ok:
                 return True
 
-            print(f"Telegram Markdown send failed ({response.status_code}): {response.text}")
+            print(f"Telegram formatted send failed ({response.status_code}): {response.text}")
             fallback_response = requests.post(url, data=plain_payload, timeout=10)
             if fallback_response.ok:
-                print("Telegram alert sent without Markdown formatting")
+                print("Telegram alert sent without formatting")
                 return True
 
             print(

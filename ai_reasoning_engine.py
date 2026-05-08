@@ -7,6 +7,7 @@ from market_regime import detect_market_regime
 from multi_timeframe_engine import analyze_multi_timeframe_structure
 from setup_filters import evaluate_setup_quality
 from vision_ai import score_chart_structure
+from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key
 
 
 def _safe_float(value, default=0.0):
@@ -182,6 +183,27 @@ def build_reasoning_report(
         score -= 10
         warnings.append(f"Risk/reward weak: {rr:.2f}R")
 
+    learning_context = {
+        "alert_type": trade_type,
+        "entry_mode": setup.get("entry_mode", "SWING" if trade_type == "SWING" else "STANDARD"),
+        "direction": direction,
+        "market_regime": regime.get("regime"),
+        "mtf_structure": mtf.get("structure"),
+        "chart_structure": vision.get("quality"),
+    }
+    learning_context["setup_key"] = setup_structure_key(learning_context)
+
+    learning_score_adjustment = score_adjustment(learning_context)
+    learning_priority_bonus = priority_bonus(learning_context)
+    if learning_score_adjustment:
+        score += learning_score_adjustment
+        reasons.append(f"Historical setup edge adjusted score by {learning_score_adjustment:+.1f}")
+    elif learning_priority_bonus < 0:
+        warnings.append("Historical setup performance is not yet favorable")
+
+    confidence_seed = setup.get("confidence", setup.get("ml_probability", base_score))
+    learning_confidence = calibrate_confidence(confidence_seed, learning_context)
+
     final_score = max(0, min(100, round(score, 2)))
 
     if reject_reasons and final_score < 85:
@@ -209,6 +231,8 @@ def build_reasoning_report(
         reasons,
         warnings,
         reject_reasons,
+        learning_confidence,
+        learning_priority_bonus,
     )
 
     return {
@@ -223,6 +247,9 @@ def build_reasoning_report(
         "reasons": reasons,
         "warnings": warnings,
         "reject_reasons": reject_reasons,
+        "learning_context": learning_context,
+        "learning_confidence": learning_confidence,
+        "priority_bonus": learning_priority_bonus,
         "narrative": narrative,
     }
 
@@ -241,6 +268,8 @@ def _build_narrative(
     reasons,
     warnings,
     reject_reasons,
+    learning_confidence=None,
+    learning_priority_bonus=0,
 ):
 
     regime = regime or {}
@@ -248,6 +277,8 @@ def _build_narrative(
     execution = execution or {}
     setup_quality = setup_quality or {}
     vision = vision or {}
+    learning_confidence = learning_confidence or {}
+    learning_stats = learning_confidence.get("learning_stats") or {}
 
     lines = [
         f"AI Reasoning: {trade_type} {direction} {ticker} classified as {decision} with composite score {final_score}/100.",
@@ -255,6 +286,15 @@ def _build_narrative(
         f"MTF structure: {mtf.get('structure', 'UNKNOWN')} with {mtf.get('aligned_timeframes', 0)} aligned timeframes.",
         f"Execution quality: {execution.get('quality', 'UNKNOWN')} | Setup filter: {setup_quality.get('status', 'UNKNOWN')} | Chart structure: {vision.get('quality', 'UNKNOWN')}.",
     ]
+
+    if learning_stats:
+        lines.append(
+            "Historical learning: "
+            f"win rate {learning_stats.get('win_rate', 0) * 100:.1f}% over {learning_stats.get('closed', 0)} closed alerts; "
+            f"forecast accuracy {learning_stats.get('forecast_accuracy', 0) * 100:.1f}%; "
+            f"confidence {learning_confidence.get('base_confidence', 0):.1f}% -> {learning_confidence.get('calibrated_confidence', 0):.1f}%; "
+            f"priority bonus {learning_priority_bonus:+.1f}."
+        )
 
     if reasons:
         lines.append("Strengths: " + "; ".join(reasons[:6]) + ".")

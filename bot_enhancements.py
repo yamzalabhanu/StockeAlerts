@@ -71,11 +71,16 @@ def apply_enhancements(bot_cls):
             # Swing scan runs before intraday quality-window gate.
             # This allows 2-10 day swing setup alerts outside scalp windows.
             try:
-                process_swing_candidate(self, ticker, tech)
+                swing_setup = process_swing_candidate(self, ticker, tech)
+                if swing_setup:
+                    self._swing_alerts_sent_this_scan = getattr(self, "_swing_alerts_sent_this_scan", 0) + 1
             except Exception as e:
                 print(f"{ticker}: swing scan error: {e}")
 
             if not ENABLE_INTRADAY_ALERTS:
+                return None
+
+            if not tech.get("intraday_available", True):
                 return None
 
             if not self.is_regular_market_hours() or not self.is_quality_trading_window():
@@ -103,6 +108,7 @@ def apply_enhancements(bot_cls):
                     print("⏳ Outside intraday quality window | running swing scan")
 
                 self.tickers = self.get_auto_watchlist()
+                self._swing_alerts_sent_this_scan = 0
                 candidates = []
 
                 for ticker in self.tickers:
@@ -131,7 +137,8 @@ def apply_enhancements(bot_cls):
 
                 sleep_for = SCAN_INTERVAL_SEC if in_intraday_window else 600
                 scan_label = "full scan" if in_intraday_window else "swing scan"
-                print(f"✅ {scan_label} complete | candidates={len(candidates)} | sent={sent} | sleeping {sleep_for}s")
+                swing_sent = getattr(self, "_swing_alerts_sent_this_scan", 0)
+                print(f"✅ {scan_label} complete | candidates={len(candidates)} | intraday_sent={sent} | swing_sent={swing_sent} | sleeping {sleep_for}s")
                 await asyncio.sleep(sleep_for)
             except Exception as e:
                 print(f"Scan loop error: {e}")

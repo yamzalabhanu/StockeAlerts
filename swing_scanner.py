@@ -27,8 +27,17 @@ def _trend_score(tech: Dict) -> tuple[int, list]:
     adx = safe_float((tech or {}).get('adx'))
     rel_volume = safe_float((tech or {}).get('rel_volume'))
 
-    bullish = price > ema20 > ema50 > ema200 if all([price, ema20, ema50, ema200]) else False
-    bearish = price < ema20 < ema50 < ema200 if all([price, ema20, ema50, ema200]) else False
+bullish = (
+    price and ema20 and ema50
+    and price > ema20
+    and ema20 > ema50
+)
+
+bearish = (
+    price and ema20 and ema50
+    and price < ema20
+    and ema20 < ema50
+)
 
     if bullish:
         score += 35
@@ -66,8 +75,11 @@ def score_swing_setup(tech: Dict):
     atr = safe_float(tech.get('atr14') or tech.get('atr'))
     price = safe_float(tech.get('price'))
 
-    if not atr or not price:
-        return None
+if not price:
+    return None
+
+if not atr:
+    atr = max(price * 0.015, 1)
 
     if direction == 'CALL':
         stop = round(price - (atr * SWING_ATR_STOP_MULTIPLIER), 2)
@@ -81,15 +93,15 @@ def score_swing_setup(tech: Dict):
 
     rr = round(reward / risk, 2) if risk else 0
 
-    if rr < MIN_RISK_REWARD:
-        return None
+if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
+    return None
 
-    if len(reasons) < SWING_MIN_REASONS:
-        return None
+if len(reasons) < 2:
+    return None
 
-    if score < SWING_MIN_SCORE:
-        return None
-
+if score < 45:
+    return None
+    
     tier = 'A+'
     if score < SWING_A_PLUS_SCORE:
         tier = 'A'

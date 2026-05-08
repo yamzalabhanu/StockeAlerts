@@ -16,6 +16,46 @@ MAX_CONFIDENCE_ADJUSTMENT = 15
 MAX_SCORE_ADJUSTMENT = 12
 
 
+def default_learning_stats() -> Dict[str, Any]:
+    """Neutral learning values used until enough closed alerts exist.
+
+    A missing history bucket should never display as a 0% win rate/forecast;
+    0% is only accurate when historical data actually proves it.
+    """
+    return {
+        "wins": 0,
+        "losses": 0,
+        "open": 0,
+        "total": 0,
+        "closed": 0,
+        "win_rate": DEFAULT_WIN_RATE,
+        "forecast_accuracy": DEFAULT_FORECAST_ACCURACY,
+        "forecast_accuracy_samples": 0,
+        "avg_max_gain_pct": 0.0,
+        "avg_max_loss_pct": 0.0,
+        "confidence_adjustment": 0.0,
+        "score_adjustment": 0.0,
+        "learning_status": "BASELINE",
+    }
+
+
+def _complete_learning_stats(stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    completed = default_learning_stats()
+    completed.update(stats or {})
+    completed["closed"] = _safe_int(
+        completed.get("closed"),
+        _safe_int(completed.get("wins")) + _safe_int(completed.get("losses")),
+    )
+    completed["win_rate"] = _safe_float(completed.get("win_rate"), DEFAULT_WIN_RATE)
+    completed["forecast_accuracy"] = _safe_float(completed.get("forecast_accuracy"), DEFAULT_FORECAST_ACCURACY)
+    completed["forecast_accuracy_samples"] = _safe_int(completed.get("forecast_accuracy_samples"))
+    if completed["closed"] >= MIN_SAMPLES_FOR_CONFIDENCE:
+        completed.setdefault("learning_status", "HISTORICAL")
+        if completed.get("learning_status") == "BASELINE":
+            completed["learning_status"] = "HISTORICAL"
+    return completed
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None or value == "":
@@ -81,6 +121,11 @@ def _group_keys(row: Dict[str, Any]) -> Iterable[str]:
 
 
 def _forecast_accuracy(row: Dict[str, Any]) -> Optional[float]:
+    max_gain = _safe_float(row.get("max_gain_pct"))
+    max_loss = _safe_float(row.get("max_loss_pct"))
+    if _is_win(row) is None and max_gain == 0 and max_loss == 0:
+        return None
+
     explicit = row.get("forecast_accuracy_pct")
     if explicit not in (None, ""):
         return max(0.0, min(1.0, _safe_float(explicit) / 100.0))
@@ -95,7 +140,7 @@ def _forecast_accuracy(row: Dict[str, Any]) -> Optional[float]:
     if expected <= 0:
         return None
 
-    realized = abs(_safe_float(row.get("max_gain_pct")))
+    realized = abs(max_gain)
     error = abs(expected - realized)
     return max(0.0, min(1.0, 1.0 - (error / expected)))
 
@@ -208,18 +253,37 @@ def get_setup_learning(row: Dict[str, Any], model: Optional[Dict[str, Any]] = No
     model = model or load_learning()
     keys = list(_group_keys(row))
     buckets = model.get("buckets") or {}
-    best = {}
+    best = None
     best_key = None
+
     for key in reversed(keys):
         stats = buckets.get(key) or {}
-        if stats.get("closed", 0) >= MIN_SAMPLES_FOR_CONFIDENCE:
+        if _safe_int(stats.get("closed")) >= MIN_SAMPLES_FOR_CONFIDENCE:
             best = stats
             best_key = key
             break
-    if not best:
-        best_key = keys[-1]
-        best = buckets.get(best_key) or {}
-    return {"key": best_key, "stats": best}
+
+    if best is None:
+        # Prefer the broad aggregate bucket over an empty structure bucket. This
+        # keeps WR/Forecast representative of observed history when a specific
+        # setup has too few samples.
+        fallback_keys = (
+            "ALL",
+            f"MODE_DIR:{_normalize(row.get('entry_mode'), 'STANDARD')}:{_normalize(row.get('direction'), 'ANY')}",
+            keys[-1],
+        )
+        for key in fallback_keys:
+            stats = buckets.get(key) or {}
+            if stats:
+                best = stats
+                best_key = key
+                break
+
+    if best is None:
+        best = default_learning_stats()
+        best_key = "BASELINE"
+
+    return {"key": best_key, "stats": _complete_learning_stats(best)}
 
 
 def calibrate_confidence(base_confidence: Any, setup_context: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from swing_integration import _hold_days_to_horizon_minutes, process_swing_candidate
+from swing_integration import _hold_days_to_horizon_minutes, meets_swing_benchmark, process_swing_candidate
 
 
 class SwingIntegrationHoldDaysTests(unittest.TestCase):
@@ -35,13 +35,25 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             "reasons": ["test reason"],
         }
 
+    def _reasoning(self):
+        return {
+            "decision": "A+",
+            "final_score": 95,
+            "reject_reasons": [],
+            "execution": {"quality": "GOOD"},
+            "setup_quality": {"status": "PASS"},
+            "vision": {"quality": "ELITE"},
+            "mtf": {"structure": "STRONG_ALIGNMENT"},
+            "learning_context": {"alert_type": "SWING", "entry_mode": "SWING", "direction": "CALL"},
+        }
+
     def test_process_swing_candidate_only_returns_when_telegram_send_succeeds(self):
         class Bot:
             def send_telegram_msg(self, _message):
                 return False
 
         with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
-            patch("swing_integration.build_reasoning_report", return_value={}), \
+            patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
             patch("swing_integration.log_swing_alert") as log_swing_alert, \
             patch("swing_integration.track_outcome") as track_outcome:
             result = process_swing_candidate(Bot(), "TEST", {})
@@ -56,13 +68,28 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
                 return True
 
         with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
-            patch("swing_integration.build_reasoning_report", return_value={}), \
+            patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
             patch("swing_integration.log_swing_alert"), \
             patch("swing_integration.track_outcome"):
             result = process_swing_candidate(Bot(), "TEST", {})
 
         self.assertIsNotNone(result)
         self.assertEqual(result["direction"], "CALL")
+
+    def test_swing_benchmark_rejects_ai_reject_risks(self):
+        reasoning = self._reasoning()
+        reasoning["reject_reasons"] = ["Setup failed elite quality filters"]
+
+        self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
+
+    def test_swing_benchmark_accepts_clean_call_or_put_a_plus(self):
+        for direction in ("CALL", "PUT"):
+            setup = self._setup()
+            setup["direction"] = direction
+            reasoning = self._reasoning()
+            reasoning["learning_context"]["direction"] = direction
+
+            self.assertTrue(meets_swing_benchmark(setup, reasoning))
 
 
 if __name__ == "__main__":

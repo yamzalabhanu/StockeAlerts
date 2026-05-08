@@ -3,6 +3,8 @@ import datetime as dt
 import re
 import time
 
+from bot_utils import safe_float
+
 from config import (
     ENABLE_SWING_ALERTS,
     LOG_FILE,
@@ -11,10 +13,62 @@ from config import (
 )
 from swing_scanner import score_swing_setup, format_swing_alert
 from ai_reasoning_engine import build_reasoning_report
+from setup_filters import PASS, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 
 SWING_ALERT_CACHE = {}
+
+
+SWING_MIN_BENCHMARK_RR = 2.0
+SWING_REQUIRED_DECISION = "A+"
+SWING_REQUIRED_COMPOSITE_SCORE = 100
+SWING_REQUIRED_REGIME = "TRENDING_BULL"
+SWING_REQUIRED_EXECUTION = WARNING
+SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING}
+SWING_REQUIRED_CHART_STRUCTURE = "ELITE"
+SWING_REQUIRED_MTF_STRUCTURE = "STRONG_ALIGNMENT"
+
+
+def meets_swing_benchmark(setup, reasoning):
+    """Return True only for swing alerts matching the required elite criteria."""
+    setup = setup or {}
+    reasoning = reasoning or {}
+
+    if reasoning.get("decision") != SWING_REQUIRED_DECISION:
+        return False
+
+    composite_score = safe_float(reasoning.get("final_score") or setup.get("score"))
+    if composite_score != SWING_REQUIRED_COMPOSITE_SCORE:
+        return False
+
+    if safe_float(setup.get("risk_reward")) < SWING_MIN_BENCHMARK_RR:
+        return False
+
+    if reasoning.get("reject_reasons"):
+        return False
+
+    regime = (reasoning.get("regime") or {}).get("regime")
+    if regime != SWING_REQUIRED_REGIME:
+        return False
+
+    mtf_structure = (reasoning.get("mtf") or {}).get("structure")
+    if mtf_structure != SWING_REQUIRED_MTF_STRUCTURE:
+        return False
+
+    execution = (reasoning.get("execution") or {}).get("quality")
+    if execution != SWING_REQUIRED_EXECUTION:
+        return False
+
+    setup_filter = (reasoning.get("setup_quality") or {}).get("status")
+    if setup_filter not in SWING_ALLOWED_SETUP_FILTERS:
+        return False
+
+    chart_structure = (reasoning.get("vision") or {}).get("quality")
+    if chart_structure != SWING_REQUIRED_CHART_STRUCTURE:
+        return False
+
+    return setup.get("direction") in {"CALL", "PUT"}
 
 
 def _hold_days_to_horizon_minutes(hold_days, default_days=SWING_HOLD_DAYS_MAX):
@@ -131,6 +185,13 @@ def process_swing_candidate(bot, ticker, tech):
         setup["ai_reasoning"] = reasoning
         setup["score"] = reasoning.get("final_score", setup.get("score", 0))
         setup["decision"] = reasoning.get("decision", setup.get("tier", "WATCH"))
+
+        if not meets_swing_benchmark(setup, reasoning):
+            print(
+                f"{ticker}: swing benchmark rejected "
+                f"({setup.get('direction')} {setup.get('decision')} score {setup.get('score')})"
+            )
+            return None
         learning_context = reasoning.get("learning_context") or {"alert_type": "SWING", "entry_mode": "SWING", "direction": setup.get("direction")}
         confidence_learning = calibrate_confidence(setup.get("score", 0), learning_context)
         setup["calibrated_confidence"] = confidence_learning.get("calibrated_confidence")

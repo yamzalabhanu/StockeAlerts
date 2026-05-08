@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 
 import config
 from bot_utils import safe_float
+from performance_learning import default_learning_stats
 from config import (
     MIN_RISK_REWARD,
     SWING_A_PLUS_SCORE,
@@ -702,7 +703,8 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
     ).get("quality", "UNKNOWN")
 
     learning_confidence = reasoning.get("learning_confidence") or {}
-    learning_stats = learning_confidence.get("learning_stats") or {}
+    learning_stats = default_learning_stats()
+    learning_stats.update(learning_confidence.get("learning_stats") or {})
 
     prob_line = (
         f"🧠 ML Probability: {probability}\n"

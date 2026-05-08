@@ -551,34 +551,38 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
     async def run(self):
         print("🚀 Stock Technical AI Bot Running")
         while True:
-            if not self.is_regular_market_hours() or not self.is_quality_trading_window():
-                self.maybe_send_daily_learning_report()
-                print("⏸ Outside quality market window | sleeping 600s")
-                await asyncio.sleep(600)
-                continue
+            try:
+                if not self.is_regular_market_hours() or not self.is_quality_trading_window():
+                    self.maybe_send_daily_learning_report()
+                    print("⏸ Outside quality market window | sleeping 600s")
+                    await asyncio.sleep(600)
+                    continue
 
-            self.tickers = self.get_auto_watchlist()
-            candidates = []
-            for ticker in self.tickers:
-                candidate = await self.check_ticker(ticker)
-                if candidate:
-                    candidates.append(candidate)
+                self.tickers = self.get_auto_watchlist()
+                candidates = []
+                for ticker in self.tickers:
+                    candidate = await self.check_ticker(ticker)
+                    if candidate:
+                        candidates.append(candidate)
 
-            candidates.sort(key=lambda x: x["ranking_score"], reverse=True)
-            selected = candidates[:MAX_ALERTS_PER_SCAN] if RANK_TOP_ALERTS_ONLY else candidates
+                candidates.sort(key=lambda x: x["ranking_score"], reverse=True)
+                selected = candidates[:MAX_ALERTS_PER_SCAN] if RANK_TOP_ALERTS_ONLY else candidates
 
-            for c in selected:
-                self.alert(
-                    c["ticker"],
-                    c["setup"],
-                    c["tech"],
-                    c["ai"],
-                    c.get("intraday"),
-                    c.get("entry_mode", "STANDARD"),
-                    c.get("mode_reason", ""),
-                    c["ranking_score"],
-                )
-                self.mark_alert(c["ticker"], c["setup"]["direction"])
+                for c in selected:
+                    self.alert(
+                        c["ticker"],
+                        c["setup"],
+                        c["tech"],
+                        c["ai"],
+                        c.get("intraday"),
+                        c.get("entry_mode", "STANDARD"),
+                        c.get("mode_reason", ""),
+                        c["ranking_score"],
+                    )
+                    self.mark_alert(c["ticker"], c["setup"]["direction"])
 
-            print(f"✅ Scan complete | candidates={len(candidates)} | sent={len(selected)} | sleeping {SCAN_INTERVAL_SEC}s")
-            await asyncio.sleep(SCAN_INTERVAL_SEC)
+                print(f"✅ Scan complete | candidates={len(candidates)} | sent={len(selected)} | sleeping {SCAN_INTERVAL_SEC}s")
+                await asyncio.sleep(SCAN_INTERVAL_SEC)
+            except Exception as e:
+                print(f"Scan loop error: {e}")
+                await asyncio.sleep(SCAN_INTERVAL_SEC)

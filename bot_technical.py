@@ -251,6 +251,97 @@ class StockTechnicalBase:
             print(f"{ticker}: aggregate error {timespan}: {e}")
             return []
 
+
+    def build_daily_technical_context(self, ticker, daily, day):
+        daily_closes = [safe_float(x.close) for x in daily if x.close is not None]
+        daily_highs = [safe_float(x.high) for x in daily if x.high is not None]
+        daily_lows = [safe_float(x.low) for x in daily if x.low is not None]
+        daily_volumes = [safe_float(x.volume) for x in daily if x.volume is not None]
+
+        if not daily_closes:
+            return None
+
+        dma20 = self.sma(daily_closes, DMA_SHORT)
+        dma50 = self.sma(daily_closes, DMA_FAST)
+        dma200 = self.sma(daily_closes, DMA_SLOW)
+        atr14 = self.atr(daily, ATR_PERIOD)
+
+        prev = daily[-2] if len(daily) >= 2 else None
+        prev_high = safe_float(prev.high) if prev else None
+        prev_low = safe_float(prev.low) if prev else None
+
+        last_20_daily = daily[-20:] if len(daily) >= 20 else daily
+        recent_high = max([safe_float(x.high) for x in last_20_daily]) if last_20_daily else None
+        recent_low = min([safe_float(x.low) for x in last_20_daily]) if last_20_daily else None
+
+        avg_20_volume = (
+            sum(daily_volumes[-20:]) / 20
+            if len(daily_volumes) >= 20
+            else None
+        )
+        current_volume = daily_volumes[-1] if daily_volumes else None
+        rel_volume = (
+            current_volume / avg_20_volume
+            if current_volume is not None and avg_20_volume
+            else None
+        )
+
+        price = daily_closes[-1]
+
+        daily_trend = "NEUTRAL"
+        if dma20 and dma50:
+            if price > dma20 > dma50:
+                daily_trend = "BULLISH"
+            elif price < dma20 < dma50:
+                daily_trend = "BEARISH"
+
+        weekly_trend = "NEUTRAL"
+        if len(daily_closes) >= 6:
+            week_change = pct_diff(daily_closes[-1], daily_closes[-6])
+            if week_change is not None and week_change >= 1:
+                weekly_trend = "BULLISH"
+            elif week_change is not None and week_change <= -1:
+                weekly_trend = "BEARISH"
+
+        return {
+            "ticker": ticker,
+            "trading_day": str(day),
+            "price": price,
+            "vwap": None,
+            "ema9": None,
+            "ema21": None,
+            "ema50": None,
+            "dma20": dma20,
+            "dma50": dma50,
+            "dma200": dma200,
+            "atr14": atr14,
+            "trend_5m": "NEUTRAL",
+            "trend_15m": "NEUTRAL",
+            "daily_trend": daily_trend,
+            "weekly_trend": weekly_trend,
+            "orb_high": None,
+            "orb_low": None,
+            "premarket_high": None,
+            "premarket_low": None,
+            "prev_high": prev_high,
+            "prev_low": prev_low,
+            "recent_high": recent_high,
+            "recent_low": recent_low,
+            "previous_recent_high": prev_high,
+            "previous_recent_low": prev_low,
+            "current_volume": current_volume,
+            "avg_20_volume": avg_20_volume,
+            "rel_volume": rel_volume,
+            "daily_current_volume": current_volume,
+            "daily_avg_20_volume": avg_20_volume,
+            "daily_closes": daily_closes,
+            "last_60_closes": daily_closes[-60:],
+            "last_5_closes": daily_closes[-5:],
+            "last_5_lows": daily_lows[-5:],
+            "last_5_highs": daily_highs[-5:],
+            "intraday_available": False,
+        }
+
     def get_technical_context(self, ticker):
         now_ts = time.time()
 
@@ -266,20 +357,16 @@ class StockTechnicalBase:
             print(f"{ticker}: no daily data")
             return None
 
-        if not minute:
-            print(f"{ticker}: no minute data for {day}")
+        daily_tech = self.build_daily_technical_context(ticker, daily, day)
+        if not daily_tech:
+            print(f"{ticker}: daily context unavailable")
             return None
 
-        daily_closes = [safe_float(x.close) for x in daily if x.close is not None]
-
-        dma20 = self.sma(daily_closes, DMA_SHORT)
-        dma50 = self.sma(daily_closes, DMA_FAST)
-        dma200 = self.sma(daily_closes, DMA_SLOW)
-        atr14 = self.atr(daily, ATR_PERIOD)
-
-        prev = daily[-2] if len(daily) >= 2 else None
-        prev_high = safe_float(prev.high) if prev else None
-        prev_low = safe_float(prev.low) if prev else None
+        if not minute:
+            print(f"{ticker}: no minute data for {day}; using daily swing context")
+            self.tech_cache[ticker] = daily_tech
+            self.tech_cache_time[ticker] = now_ts
+            return daily_tech
 
         regular = []
         premarket = []
@@ -301,9 +388,12 @@ class StockTechnicalBase:
         if not regular:
             print(
                 f"{ticker}: no regular-session bars for {day}. "
-                f"Current ET={dt.datetime.now(MARKET_TZ).strftime('%H:%M:%S')}"
+                f"Current ET={dt.datetime.now(MARKET_TZ).strftime('%H:%M:%S')}; "
+                "using daily swing context"
             )
-            return None
+            self.tech_cache[ticker] = daily_tech
+            self.tech_cache_time[ticker] = now_ts
+            return daily_tech
 
         closes = [safe_float(x.close) for x in regular]
         volumes = [safe_float(x.volume) for x in regular]
@@ -353,36 +443,32 @@ class StockTechnicalBase:
 
         price = safe_float(regular[-1].close)
 
-        tech = {
-            "ticker": ticker,
-            "trading_day": str(day),
+        tech = dict(daily_tech)
+        tech.update({
             "price": price,
             "vwap": vwap,
             "ema9": ema9,
             "ema21": ema21,
             "ema50": ema50,
-            "dma20": dma20,
-            "dma50": dma50,
-            "dma200": dma200,
-            "atr14": atr14,
             "trend_5m": trend_5m,
             "trend_15m": trend_15m,
             "orb_high": orb_high,
             "orb_low": orb_low,
             "premarket_high": pm_high,
             "premarket_low": pm_low,
-            "prev_high": prev_high,
-            "prev_low": prev_low,
             "recent_high": recent_high,
             "recent_low": recent_low,
             "previous_recent_high": previous_recent_high,
             "previous_recent_low": previous_recent_low,
             "current_volume": current_volume,
             "avg_20_volume": avg_20_volume,
-            "last_5_closes": [safe_float(x.close) for x in regular[-5:]],
-            "last_5_lows": [safe_float(x.low) for x in regular[-5:]],
-            "last_5_highs": [safe_float(x.high) for x in regular[-5:]],
-        }
+            "intraday_current_volume": current_volume,
+            "intraday_avg_20_volume": avg_20_volume,
+            "last_5_intraday_closes": [safe_float(x.close) for x in regular[-5:]],
+            "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
+            "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],
+            "intraday_available": True,
+        })
 
         self.tech_cache[ticker] = tech
         self.tech_cache_time[ticker] = now_ts

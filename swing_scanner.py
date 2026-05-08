@@ -13,8 +13,6 @@ from config import (
 )
 
 
-<<<<<<< HEAD
-=======
 def _pct_diff(a, b):
     try:
         if a is None or b in (None, 0):
@@ -32,8 +30,6 @@ def _near(price, level, tolerance_pct):
 def _safe_list(values):
     return [safe_float(x) for x in (values or []) if x is not None]
 
-
->>>>>>> b32505341b9ca06d788e06a563d8d05f8284bc80
 def _ema(values, length):
     if not values or len(values) < length:
         return None
@@ -46,7 +42,6 @@ def _ema(values, length):
 
     return ema_val
 
-<<<<<<< HEAD
 
 def _rsi(values, length=14):
     if not values or len(values) < length + 1:
@@ -135,25 +130,344 @@ def score_swing_setup(tech: Dict):
 
     if not atr:
         atr = max(price * 0.015, 1)
-=======
-def score_swing_setup(tech: Dict):
-    tech = tech or {}
-    score, reasons, direction = _trend_score(tech)
+
+def _rsi(values, length=14):
+    values = _safe_list(values)
 
     if len(values) < length + 1:
         return None
 
-    price = safe_float(tech.get("price"))
-    if not price:
-        return None
+    gains, losses = [], []
 
-    atr = safe_float(tech.get("atr14") or tech.get("atr"))
-    if not atr:
-        atr = max(price * 0.015, 1)
+    for i in range(1, len(values)):
+        delta = values[i] - values[i - 1]
+
+        gains.append(max(delta, 0))
+        losses.append(abs(min(delta, 0)))
+
+    avg_gain = sum(gains[-length:]) / length
+    avg_loss = sum(losses[-length:]) / length
+
+    if avg_loss == 0:
+        return 100
+
+    rs = avg_gain / avg_loss
+
+    return 100 - (100 / (1 + rs))
+
+
+def _macd(values):
+    values = _safe_list(values)
+
+    if len(values) < 35:
+        return None, None, None
+
+    ema12_series = []
+    ema26_series = []
+
+    for i in range(len(values)):
+        ema12_series.append(_ema(values[: i + 1], 12))
+        ema26_series.append(_ema(values[: i + 1], 26))
+
+    macd_series = [
+        a - b
+        for a, b in zip(ema12_series, ema26_series)
+        if a is not None and b is not None
+    ]
+
+    if len(macd_series) < 9:
+        return None, None, None
+
+    signal = _ema(macd_series, 9)
+    macd_val = macd_series[-1]
+    hist = macd_val - signal if signal is not None else None
+
+    return macd_val, signal, hist
+
+
+def _trend_strength_score(direction, tech, price, ema20, ema50, sma200):
+    score, reasons = 0, []
 
     if direction == "CALL":
-        stop = round(price - (atr * SWING_ATR_STOP_MULTIPLIER), 2)
-        target = round(price + (atr * SWING_ATR_TARGET_MULTIPLIER), 2)
+        if ema20 and price > ema20:
+            score += 10
+            reasons.append("price above 20 EMA")
+
+        if ema50 and price > ema50:
+            score += 10
+            reasons.append("price above 50 EMA")
+
+        if sma200 and price > sma200:
+            score += 10
+            reasons.append("price above 200 SMA")
+
+        if ema20 and ema50 and ema20 > ema50:
+            score += 10
+            reasons.append("20 EMA above 50 EMA")
+
+        if ema50 and sma200 and ema50 > sma200:
+            score += 10
+            reasons.append("50 EMA above 200 SMA")
+
+    else:
+        if ema20 and price < ema20:
+            score += 10
+            reasons.append("price below 20 EMA")
+
+        if ema50 and price < ema50:
+            score += 10
+            reasons.append("price below 50 EMA")
+
+        if sma200 and price < sma200:
+            score += 10
+            reasons.append("price below 200 SMA")
+
+        if ema20 and ema50 and ema20 < ema50:
+            score += 10
+            reasons.append("20 EMA below 50 EMA")
+
+        if ema50 and sma200 and ema50 < sma200:
+            score += 10
+            reasons.append("50 EMA below 200 SMA")
+
+    return score, reasons
+
+
+def _rsi_score(direction, rsi):
+    if rsi is None:
+        return 0, []
+
+    score, reasons = 0, []
+
+    if direction == "CALL":
+        if 55 <= rsi <= 70:
+            score += 15
+            reasons.append(f"RSI ideal bullish zone {rsi:.1f}")
+
+        elif 40 <= rsi < 55:
+            score += 8
+            reasons.append(f"RSI bounce zone {rsi:.1f}")
+
+        elif rsi > 80:
+            score -= 10
+            reasons.append(f"RSI overextended {rsi:.1f}")
+
+        elif rsi < 40:
+            score -= 8
+            reasons.append(f"RSI weak {rsi:.1f}")
+
+    else:
+        if 30 <= rsi <= 45:
+            score += 15
+            reasons.append(f"RSI bearish momentum zone {rsi:.1f}")
+
+        elif 45 < rsi <= 60:
+            score += 8
+            reasons.append(f"RSI rejection zone {rsi:.1f}")
+
+        elif rsi > 65:
+            score -= 8
+            reasons.append(f"RSI too strong for puts {rsi:.1f}")
+
+    return score, reasons
+
+
+def _volume_score(tech):
+    avg_vol = safe_float(tech.get("avg_20_volume"))
+    cur_vol = safe_float(tech.get("current_volume"))
+    rel_vol = safe_float(tech.get("rel_volume"))
+
+    if not rel_vol and avg_vol and cur_vol:
+        rel_vol = cur_vol / avg_vol
+
+    score, reasons = 0, []
+
+    if not rel_vol:
+        return 0, []
+
+    if rel_vol >= 3:
+        score += 20
+        reasons.append(f"institutional volume {rel_vol:.1f}x")
+
+    elif rel_vol >= 2:
+        score += 15
+        reasons.append(f"strong volume {rel_vol:.1f}x")
+
+    elif rel_vol >= 1.5:
+        score += 10
+        reasons.append(f"volume confirmation {rel_vol:.1f}x")
+
+    elif rel_vol < 0.7:
+        score -= 8
+        reasons.append(f"weak volume {rel_vol:.1f}x")
+
+    return score, reasons
+
+
+def _macd_score(direction, macd_val, signal, hist):
+    if macd_val is None or signal is None or hist is None:
+        return 0, []
+
+    score, reasons = 0, []
+
+    if direction == "CALL":
+        if macd_val > signal:
+            score += 10
+            reasons.append("MACD bullish cross")
+
+        if hist > 0:
+            score += 5
+            reasons.append("MACD histogram positive")
+
+        if macd_val > 0:
+            score += 5
+            reasons.append("MACD above zero")
+
+    else:
+        if macd_val < signal:
+            score += 10
+            reasons.append("MACD bearish cross")
+
+        if hist < 0:
+            score += 5
+            reasons.append("MACD histogram negative")
+
+        if macd_val < 0:
+            score += 5
+            reasons.append("MACD below zero")
+
+    return score, reasons
+
+
+def _adx_proxy_score(tech, ema20, ema50):
+    adx = tech.get("adx")
+
+    score, reasons = 0, []
+
+    if adx is not None:
+        adx = safe_float(adx)
+
+        if adx >= 25:
+            score += 10
+            reasons.append(f"ADX strong trend {adx:.1f}")
+
+        elif adx >= 20:
+            score += 6
+            reasons.append(f"ADX trend forming {adx:.1f}")
+
+        elif adx < 18:
+            score -= 10
+            reasons.append(f"ADX chop risk {adx:.1f}")
+
+        return score, reasons
+
+    if ema20 and ema50:
+        spread = abs(_pct_diff(ema20, ema50) or 0)
+
+        if spread >= 1.5:
+            score += 6
+            reasons.append(f"EMA spread trend proxy {spread:.1f}%")
+
+        elif spread < 0.4:
+            score -= 5
+            reasons.append("EMA spread too tight / chop risk")
+
+    return score, reasons
+
+
+def _structure_score(direction, tech, price, ema20, ema50):
+    score, reasons = 0, []
+
+    recent_high = tech.get("recent_high")
+    recent_low = tech.get("recent_low")
+    prev_high = tech.get("prev_high")
+    prev_low = tech.get("prev_low")
+
+    last_lows = _safe_list(tech.get("last_5_lows"))
+    last_highs = _safe_list(tech.get("last_5_highs"))
+
+    if direction == "CALL":
+        resistance = max(
+            [x for x in [recent_high, prev_high] if x] or [0]
+        )
+
+        if resistance and price >= resistance * 0.995:
+            score += 15
+            reasons.append("breakout near/above resistance")
+
+        if ema20 and _near(price, ema20, SWING_PULLBACK_TOLERANCE_PCT):
+            score += 12
+            reasons.append("EMA20 pullback zone")
+
+        if ema50 and _near(price, ema50, SWING_PULLBACK_TOLERANCE_PCT):
+            score += 8
+            reasons.append("EMA50 swing support zone")
+
+    else:
+        support = min(
+            [x for x in [recent_low, prev_low] if x] or [0]
+        )
+
+        if support and price <= support * 1.005:
+            score += 15
+            reasons.append("breakdown near/below support")
+
+        if ema20 and _near(price, ema20, SWING_PULLBACK_TOLERANCE_PCT):
+            score += 12
+            reasons.append("EMA20 rejection zone")
+
+        if ema50 and _near(price, ema50, SWING_PULLBACK_TOLERANCE_PCT):
+            score += 8
+            reasons.append("EMA50 swing rejection zone")
+
+    return score, reasons
+
+
+def _relative_strength_score(direction, tech):
+    rs = str(
+        tech.get("relative_strength", tech.get("rs_vs_spy", ""))
+    ).upper()
+
+    if direction == "CALL" and rs in {
+        "STRONG",
+        "BULLISH",
+        "OUTPERFORM",
+    }:
+        return 10, ["relative strength vs market"]
+
+    if direction == "PUT" and rs in {
+        "WEAK",
+        "BEARISH",
+        "UNDERPERFORM",
+    }:
+        return 10, ["relative weakness vs market"]
+
+    return 0, []
+
+
+def _mtf_trend_score(direction, tech):
+    score, reasons = 0, []
+
+    weekly = str(tech.get("weekly_trend", "")).upper()
+    daily = str(tech.get("daily_trend", "")).upper()
+    h4 = str(tech.get("h4_trend", tech.get("trend_4h", ""))).upper()
+
+    bullish = {"BULLISH", "UP", "UPTREND"}
+    bearish = {"BEARISH", "DOWN", "DOWNTREND"}
+
+    if direction == "CALL":
+        if weekly in bullish:
+            score += 12
+            reasons.append("weekly trend bullish")
+
+        if daily in bullish:
+            score += 10
+            reasons.append("daily structure bullish")
+
+        if h4 in bullish:
+            score += 8
+            reasons.append("4H entry trend aligned")
+
     else:
         if weekly in bearish:
             score += 12
@@ -209,7 +523,7 @@ def _score_direction(
     for add_score, add_reasons in scoring_blocks:
         score += add_score
         reasons.extend(add_reasons)
->>>>>>> b32505341b9ca06d788e06a563d8d05f8284bc80
+
 
     if direction == "CALL":
         stop = price - atr * SWING_ATR_STOP_MULTIPLIER
@@ -220,15 +534,94 @@ def _score_direction(
 
     risk = abs(price - stop)
     reward = abs(target - price)
-    rr = round(reward / risk, 2) if risk else 0
 
-    if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
+    rr = reward / risk if risk else 0
+
+    if rr < MIN_RISK_REWARD:
+        score -= 10
+        reasons.append(f"RR below minimum {rr:.2f}")
+
+    return int(max(score, 0)), reasons, stop, target, rr
+
+
+def _tier(score, reasons_count):
+    if score >= SWING_A_PLUS_SCORE and reasons_count >= 5:
+        return "A+"
+
+    if score >= SWING_A_SCORE and reasons_count >= 4:
+        return "A"
+
+    return "WATCH"
+
+
+def score_swing_setup(tech: Dict) -> Optional[Dict]:
+    tech = tech or {}
+
+    price = safe_float(tech.get("price"))
+    atr = safe_float(tech.get("atr14"))
+
+    if not price:
         return None
 
-    if len(reasons) < 2:
+    if not atr:
+        atr = max(price * 0.02, 1.0)
+
+    closes = (
+        tech.get("daily_closes")
+        or tech.get("last_60_closes")
+        or tech.get("last_5_closes")
+    )
+
+    closes = _safe_list(closes) or [price]
+
+    (
+        call_score,
+        call_reasons,
+        call_stop,
+        call_target,
+        call_rr,
+    ) = _score_direction(
+        "CALL",
+        tech,
+        price,
+        atr,
+        closes,
+    )
+
+    (
+        put_score,
+        put_reasons,
+        put_stop,
+        put_target,
+        put_rr,
+    ) = _score_direction(
+        "PUT",
+        tech,
+        price,
+        atr,
+        closes,
+    )
+
+    if call_score >= put_score:
+        direction = "CALL"
+        score = call_score
+        reasons = call_reasons
+        stop = call_stop
+        target = call_target
+        rr = call_rr
+
+    else:
+        direction = "PUT"
+        score = put_score
+        reasons = put_reasons
+        stop = put_stop
+        target = put_target
+        rr = put_rr
+
+    if score < SWING_MIN_SCORE:
         return None
 
-    if score < 45:
+    if len(reasons) < SWING_MIN_REASONS:
         return None
 
     tier = "A+"
@@ -239,36 +632,66 @@ def _score_direction(
     if score < SWING_A_SCORE:
         tier = "WATCH"
 
+    tier = _tier(score, len(reasons))
+
+
     return {
-        "direction": direction,
-        "score": score,
+        "alert_type": "SWING",
         "tier": tier,
+        "direction": direction,
+        "score": min(score, 100),
         "entry": round(price, 2),
-        "stop": stop,
-        "target": target,
-        "risk_reward": rr,
-        "hold_days": max(SWING_HOLD_DAYS_MIN, min(SWING_HOLD_DAYS_MAX, 5)),
-        "reasons": reasons,
+        "stop": round(stop, 2),
+        "target": round(target, 2),
+        "risk_reward": round(rr, 2),
+        "hold_days": f"{SWING_HOLD_DAYS_MIN}-{SWING_HOLD_DAYS_MAX}",
+        "timeframe": "Weekly / Daily / 4H",
+        "reasons": reasons[:10],
+        "created_at": dt.datetime.now(
+            dt.timezone.utc
+        ).isoformat(),
     }
 
 
 def format_swing_alert(ticker: str, setup: Dict) -> str:
     setup = setup or {}
 
-    emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
+    emoji = (
+        "🟢"
+        if setup.get("direction") == "CALL"
+        else "🔴"
+    )
 
     probability = setup.get("ml_probability")
+
     reasoning = setup.get("ai_reasoning") or {}
+
     narrative = reasoning.get("narrative", "")
 
-    regime = (reasoning.get("regime") or {}).get("regime", "UNKNOWN")
-    mtf = (reasoning.get("mtf") or {}).get("structure", "UNKNOWN")
-    execution = (reasoning.get("execution") or {}).get("quality", "UNKNOWN")
-    vision = (reasoning.get("vision") or {}).get("quality", "UNKNOWN")
+    regime = (
+        reasoning.get("regime") or {}
+    ).get("regime", "UNKNOWN")
+
+    mtf = (
+        reasoning.get("mtf") or {}
+    ).get("structure", "UNKNOWN")
+
+    execution = (
+        reasoning.get("execution") or {}
+    ).get("quality", "UNKNOWN")
+
+    vision = (
+        reasoning.get("vision") or {}
+    ).get("quality", "UNKNOWN")
+
     learning_confidence = reasoning.get("learning_confidence") or {}
     learning_stats = learning_confidence.get("learning_stats") or {}
 
-    prob_line = f"🧠 ML Probability: {probability}\n" if probability is not None else ""
+    prob_line = (
+        f"🧠 ML Probability: {probability}\n"
+        if probability is not None
+        else ""
+    )
     history_line = (
         f"📚 History: WR {float(learning_stats.get('win_rate', 0)) * 100:.1f}% | "
         f"Forecast {float(learning_stats.get('forecast_accuracy', 0)) * 100:.1f}% | "
@@ -282,8 +705,8 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f'SWING {setup.get("direction", "CALL")} '
         f'SETUP: {ticker}*\n'
         f'⭐ Score: {setup.get("score", 0)}/100\n'
-        f'{prob_line}'
-        f'{history_line}'
+        f"{prob_line}"
+        f"{history_line}"
         f'⏳ Hold: {setup.get("hold_days", "?")} days\n'
         f'🎯 Entry: {setup.get("entry", "?")}\n'
         f'🛑 Stop: {setup.get("stop", "?")}\n'

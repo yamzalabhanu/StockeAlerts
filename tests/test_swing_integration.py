@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from swing_integration import _hold_days_to_horizon_minutes, meets_swing_benchmark, process_swing_candidate
+from swing_integration import (
+    _hold_days_to_horizon_minutes,
+    meets_swing_benchmark,
+    process_swing_candidate,
+    swing_benchmark_reject_reasons,
+)
 
 
 class SwingIntegrationHoldDaysTests(unittest.TestCase):
@@ -41,7 +46,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             "final_score": 100,
             "reject_reasons": [],
             "regime": {"regime": "TRENDING_BULL"},
-            "execution": {"quality": "WARNING"},
+            "execution": {"quality": "GOOD"},
             "setup_quality": {"status": "PASS"},
             "vision": {"quality": "ELITE"},
             "mtf": {"structure": "STRONG_ALIGNMENT"},
@@ -89,15 +94,32 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             setup["direction"] = direction
             reasoning = self._reasoning()
             reasoning["learning_context"]["direction"] = direction
+            reasoning["regime"]["regime"] = "TRENDING_BULL" if direction == "CALL" else "TRENDING_BEAR"
 
             self.assertTrue(meets_swing_benchmark(setup, reasoning))
 
+    def test_swing_benchmark_accepts_a_plus_scores_above_threshold(self):
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 92
+
+        self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
+
+    def test_swing_benchmark_reject_reasons_explain_missing_criteria(self):
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 87
+        reasoning["execution"]["quality"] = "BAD"
+
+        reasons = swing_benchmark_reject_reasons(self._setup(), reasoning)
+
+        self.assertTrue(any("score 87" in reason for reason in reasons))
+        self.assertTrue(any("execution BAD" in reason for reason in reasons))
+
     def test_swing_benchmark_rejects_near_miss_criteria(self):
         near_misses = (
-            ("final_score", 99),
+            ("final_score", 89),
             ("regime.regime", "TRENDING_BEAR"),
             ("mtf.structure", "GOOD_ALIGNMENT"),
-            ("execution.quality", "GOOD"),
+            ("execution.quality", "BAD"),
             ("vision.quality", "GOOD"),
         )
 

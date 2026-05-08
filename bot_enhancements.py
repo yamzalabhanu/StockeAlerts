@@ -71,9 +71,13 @@ def apply_enhancements(bot_cls):
             # Swing scan runs before intraday quality-window gate.
             # This allows 2-10 day swing setup alerts outside scalp windows.
             try:
-                swing_setup = process_swing_candidate(self, ticker, tech)
-                if swing_setup:
-                    self._swing_alerts_sent_this_scan = getattr(self, "_swing_alerts_sent_this_scan", 0) + 1
+                swing_sent_this_scan = getattr(self, "_swing_alerts_sent_this_scan", 0)
+                if swing_sent_this_scan < MAX_SWING_ALERTS_PER_SCAN:
+                    swing_setup = process_swing_candidate(self, ticker, tech)
+                    if swing_setup:
+                        self._swing_alerts_sent_this_scan = swing_sent_this_scan + 1
+                else:
+                    print(f"{ticker}: swing alert scan cap reached ({MAX_SWING_ALERTS_PER_SCAN})")
             except Exception as e:
                 print(f"{ticker}: swing scan error: {e}")
 

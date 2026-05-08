@@ -341,8 +341,26 @@ def score_swing_setup(tech: Dict) -> Optional[Dict]:
 
 def format_swing_alert(ticker: str, setup: Dict) -> str:
     emoji = "🟢" if setup.get("direction") == "CALL" else "🔴"
+
     probability = setup.get("ml_probability")
-    prob_line = f"🧠 ML Probability: {probability}\n" if probability is not None else ""
+
+    reasoning = setup.get("ai_reasoning") or {}
+
+    narrative = reasoning.get("narrative", "")
+
+    regime = (reasoning.get("regime") or {}).get("regime", "UNKNOWN")
+
+    mtf = (reasoning.get("mtf") or {}).get("structure", "UNKNOWN")
+
+    execution = (reasoning.get("execution") or {}).get("quality", "UNKNOWN")
+
+    vision = (reasoning.get("vision") or {}).get("quality", "UNKNOWN")
+
+    prob_line = (
+        f"🧠 ML Probability: {probability}\n"
+        if probability is not None else ""
+    )
+
     return (
         f"{emoji} *{setup.get('tier', 'WATCH')} SWING {setup['direction']} SETUP: {ticker}*\n"
         f"⭐ Score: {setup['score']}/100\n"
@@ -352,5 +370,12 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f"🛑 Stop: {setup['stop']}\n"
         f"🚀 Target: {setup['target']}\n"
         f"📐 RR: {setup['risk_reward']}:1\n"
-        f"📝 Reasons: {', '.join(setup.get('reasons', []))}"
+        f"📝 Reasons: {', '.join(setup.get('reasons', []))}\n"
+        f"🧠 AI Decision: {reasoning.get('decision', 'WATCH')}\n"
+        f"📊 Composite Score: {reasoning.get('final_score', setup['score'])}/100\n"
+        f"🌍 Regime: {regime}\n"
+        f"🧭 MTF: {mtf}\n"
+        f"⚡ Execution: {execution}\n"
+        f"🏗️ Structure: {vision}\n"
+        f"\n🧠 AI Reasoning:\n{narrative}\n"
     )

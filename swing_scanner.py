@@ -15,30 +15,72 @@ from config import (
     SWING_PULLBACK_TOLERANCE_PCT,
 )
 
+def _trend_score(tech: Dict) -> tuple[int, list]:
+    score = 0
+    reasons = []
 
-def _pct_diff(a, b):
-    try:
-        if a is None or b in (None, 0):
-            return None
-        return ((float(a) - float(b)) / float(b)) * 100.0
-    except Exception:
+    price = safe_float((tech or {}).get('price'))
+    ema20 = safe_float((tech or {}).get('ema20') or (tech or {}).get('dma20'))
+    ema50 = safe_float((tech or {}).get('ema50') or (tech or {}).get('dma50'))
+    ema200 = safe_float((tech or {}).get('ema200') or (tech or {}).get('dma200'))
+    rsi = safe_float((tech or {}).get('rsi'))
+    adx = safe_float((tech or {}).get('adx'))
+    rel_volume = safe_float((tech or {}).get('rel_volume'))
+
+bullish = (
+    price and ema20 and ema50
+    and price > ema20
+    and ema20 > ema50
+)
+
+bearish = (
+    price and ema20 and ema50
+    and price < ema20
+    and ema20 < ema50
+)
+
+    if bullish:
+        score += 35
+        reasons.append('Bullish EMA alignment')
+
+    if bearish:
+        score += 35
+        reasons.append('Bearish EMA alignment')
+
+    if 55 <= rsi <= 75:
+        score += 15
+        reasons.append(f'RSI healthy {rsi:.1f}')
+
+    if adx >= 20:
+        score += 15
+        reasons.append(f'Strong ADX {adx:.1f}')
+
+    if rel_volume >= 1.5:
+        score += 15
+        reasons.append(f'Strong RVOL {rel_volume:.1f}x')
+
+    direction = 'CALL' if bullish else 'PUT' if bearish else None
+
+    return score, reasons, direction
+
+
+def score_swing_setup(tech: Dict):
+    tech = tech or {}
+
+    score, reasons, direction = _trend_score(tech)
+
+    if not direction:
+
         return None
 
 
-def _near(price, level, tolerance_pct):
-    diff = _pct_diff(price, level)
-    return diff is not None and abs(diff) <= tolerance_pct
 
+if not price:
+    return None
 
-def _safe_list(values):
-    return [safe_float(x) for x in (values or []) if x is not None]
+if not atr:
+    atr = max(price * 0.015, 1)
 
-
-def _ema(values, length):
-    values = _safe_list(values)
-
-    if len(values) < length:
-        return None
 
     k = 2 / (length + 1)
 
@@ -456,94 +498,21 @@ def _score_direction(
 
     rr = reward / risk if risk else 0
 
-    if rr < MIN_RISK_REWARD:
-        score -= 10
-        reasons.append(f"RR below minimum {rr:.2f}")
+if rr < max(MIN_RISK_REWARD - 0.5, 1.2):
+    return None
 
-    return int(max(score, 0)), reasons, stop, target, rr
+if len(reasons) < 2:
+    return None
 
+if score < 45:
+    return None
+    
+    tier = 'A+'
+    if score < SWING_A_PLUS_SCORE:
+        tier = 'A'
+    if score < SWING_A_SCORE:
+        tier = 'WATCH'
 
-def _tier(score, reasons_count):
-    if score >= SWING_A_PLUS_SCORE and reasons_count >= 5:
-        return "A+"
-
-    if score >= SWING_A_SCORE and reasons_count >= 4:
-        return "A"
-
-    return "WATCH"
-
-
-def score_swing_setup(tech: Dict) -> Optional[Dict]:
-    tech = tech or {}
-
-    price = safe_float(tech.get("price"))
-    atr = safe_float(tech.get("atr14"))
-
-    if not price:
-        return None
-
-    if not atr:
-        atr = max(price * 0.02, 1.0)
-
-    closes = (
-        tech.get("daily_closes")
-        or tech.get("last_60_closes")
-        or tech.get("last_5_closes")
-    )
-
-    closes = _safe_list(closes) or [price]
-
-    (
-        call_score,
-        call_reasons,
-        call_stop,
-        call_target,
-        call_rr,
-    ) = _score_direction(
-        "CALL",
-        tech,
-        price,
-        atr,
-        closes,
-    )
-
-    (
-        put_score,
-        put_reasons,
-        put_stop,
-        put_target,
-        put_rr,
-    ) = _score_direction(
-        "PUT",
-        tech,
-        price,
-        atr,
-        closes,
-    )
-
-    if call_score >= put_score:
-        direction = "CALL"
-        score = call_score
-        reasons = call_reasons
-        stop = call_stop
-        target = call_target
-        rr = call_rr
-
-    else:
-        direction = "PUT"
-        score = put_score
-        reasons = put_reasons
-        stop = put_stop
-        target = put_target
-        rr = put_rr
-
-    if score < SWING_MIN_SCORE:
-        return None
-
-    if len(reasons) < SWING_MIN_REASONS:
-        return None
-
-    tier = _tier(score, len(reasons))
 
     return {
         "alert_type": "SWING",

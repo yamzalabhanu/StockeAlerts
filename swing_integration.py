@@ -20,24 +20,26 @@ from performance_learning import calibrate_confidence, priority_bonus, setup_str
 SWING_ALERT_CACHE = {}
 
 
-SWING_MIN_BENCHMARK_SCORE = 90
 SWING_MIN_BENCHMARK_RR = 2.0
-SWING_ALLOWED_DECISIONS = {"A+"}
-SWING_ALLOWED_EXECUTION = {"GOOD", WARNING}
+SWING_REQUIRED_DECISION = "A+"
+SWING_REQUIRED_COMPOSITE_SCORE = 100
+SWING_REQUIRED_REGIME = "TRENDING_BULL"
+SWING_REQUIRED_EXECUTION = WARNING
 SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING}
-SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
-SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
+SWING_REQUIRED_CHART_STRUCTURE = "ELITE"
+SWING_REQUIRED_MTF_STRUCTURE = "STRONG_ALIGNMENT"
 
 
 def meets_swing_benchmark(setup, reasoning):
-    """Return True only for clean A+ swing setups in either direction."""
+    """Return True only for swing alerts matching the required elite criteria."""
     setup = setup or {}
     reasoning = reasoning or {}
 
-    if reasoning.get("decision") not in SWING_ALLOWED_DECISIONS:
+    if reasoning.get("decision") != SWING_REQUIRED_DECISION:
         return False
 
-    if safe_float(reasoning.get("final_score") or setup.get("score")) < SWING_MIN_BENCHMARK_SCORE:
+    composite_score = safe_float(reasoning.get("final_score") or setup.get("score"))
+    if composite_score != SWING_REQUIRED_COMPOSITE_SCORE:
         return False
 
     if safe_float(setup.get("risk_reward")) < SWING_MIN_BENCHMARK_RR:
@@ -46,8 +48,16 @@ def meets_swing_benchmark(setup, reasoning):
     if reasoning.get("reject_reasons"):
         return False
 
+    regime = (reasoning.get("regime") or {}).get("regime")
+    if regime != SWING_REQUIRED_REGIME:
+        return False
+
+    mtf_structure = (reasoning.get("mtf") or {}).get("structure")
+    if mtf_structure != SWING_REQUIRED_MTF_STRUCTURE:
+        return False
+
     execution = (reasoning.get("execution") or {}).get("quality")
-    if execution not in SWING_ALLOWED_EXECUTION:
+    if execution != SWING_REQUIRED_EXECUTION:
         return False
 
     setup_filter = (reasoning.get("setup_quality") or {}).get("status")
@@ -55,11 +65,7 @@ def meets_swing_benchmark(setup, reasoning):
         return False
 
     chart_structure = (reasoning.get("vision") or {}).get("quality")
-    if chart_structure not in SWING_ALLOWED_CHART_STRUCTURES:
-        return False
-
-    mtf_structure = (reasoning.get("mtf") or {}).get("structure")
-    if mtf_structure not in SWING_ALLOWED_MTF_STRUCTURES:
+    if chart_structure != SWING_REQUIRED_CHART_STRUCTURE:
         return False
 
     return setup.get("direction") in {"CALL", "PUT"}

@@ -26,7 +26,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         return {
             "direction": "CALL",
             "tier": "A+",
-            "score": 90,
+            "score": 100,
             "entry": 100,
             "stop": 95,
             "target": 120,
@@ -38,9 +38,10 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
     def _reasoning(self):
         return {
             "decision": "A+",
-            "final_score": 95,
+            "final_score": 100,
             "reject_reasons": [],
-            "execution": {"quality": "GOOD"},
+            "regime": {"regime": "TRENDING_BULL"},
+            "execution": {"quality": "WARNING"},
             "setup_quality": {"status": "PASS"},
             "vision": {"quality": "ELITE"},
             "mtf": {"structure": "STRONG_ALIGNMENT"},
@@ -82,7 +83,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
 
-    def test_swing_benchmark_accepts_clean_call_or_put_a_plus(self):
+    def test_swing_benchmark_accepts_only_exact_elite_criteria(self):
         for direction in ("CALL", "PUT"):
             setup = self._setup()
             setup["direction"] = direction
@@ -90,6 +91,26 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             reasoning["learning_context"]["direction"] = direction
 
             self.assertTrue(meets_swing_benchmark(setup, reasoning))
+
+    def test_swing_benchmark_rejects_near_miss_criteria(self):
+        near_misses = (
+            ("final_score", 99),
+            ("regime.regime", "TRENDING_BEAR"),
+            ("mtf.structure", "GOOD_ALIGNMENT"),
+            ("execution.quality", "GOOD"),
+            ("vision.quality", "GOOD"),
+        )
+
+        for path, value in near_misses:
+            with self.subTest(path=path):
+                reasoning = self._reasoning()
+                target = reasoning
+                keys = path.split(".")
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+
+                self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
 
 
 if __name__ == "__main__":

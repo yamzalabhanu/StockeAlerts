@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, Optional, Tuple
 
+import config
 from bot_utils import safe_float
 from config import (
     MIN_RISK_REWARD,
@@ -14,7 +15,18 @@ from config import (
     SWING_HOLD_DAYS_MIN,
     SWING_MIN_REASONS,
     SWING_MIN_SCORE,
-    SWING_PULLBACK_TOLERANCE_PCT,
+)
+
+DEFAULT_SWING_PULLBACK_TOLERANCE_PCT = 1.0
+SWING_PULLBACK_TOLERANCE_PCT = (
+    safe_float(
+        getattr(
+            config,
+            "SWING_PULLBACK_TOLERANCE_PCT",
+            DEFAULT_SWING_PULLBACK_TOLERANCE_PCT,
+        )
+    )
+    or DEFAULT_SWING_PULLBACK_TOLERANCE_PCT
 )
 
 

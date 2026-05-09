@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from typing import Optional
+from dataclasses import dataclass, asdict, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 import requests
 
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") or POLYGON_API_KEY
+OPTIONS_API_KEY = os.getenv("OPTIONS_API_KEY") or MASSIVE_API_KEY
+OPTIONS_API_BASE_URL = os.getenv("OPTIONS_API_BASE_URL", "https://api.polygon.io").rstrip("/")
 
 MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "100"))
 MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "250"))
@@ -17,6 +20,18 @@ TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
 TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
 MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "21"))
+
+FLOW_EXPIRY_DAYS = int(os.getenv("OPTIONS_FLOW_EXPIRY_DAYS", "45"))
+FLOW_TOP_CONTRACTS = int(os.getenv("OPTIONS_FLOW_TOP_CONTRACTS", "24"))
+FLOW_TRADE_LIMIT = int(os.getenv("OPTIONS_FLOW_TRADE_LIMIT", "50"))
+SWEEP_NOTIONAL_THRESHOLD = float(os.getenv("OPTIONS_SWEEP_NOTIONAL_THRESHOLD", "250000"))
+BLOCK_NOTIONAL_THRESHOLD = float(os.getenv("OPTIONS_BLOCK_NOTIONAL_THRESHOLD", "500000"))
+PUT_WALL_OI_THRESHOLD = int(os.getenv("OPTIONS_PUT_WALL_OI_THRESHOLD", "5000"))
+CALL_WALL_OI_THRESHOLD = int(os.getenv("OPTIONS_CALL_WALL_OI_THRESHOLD", "5000"))
+OI_BUILD_VOLUME_OI_RATIO = float(os.getenv("OPTIONS_OI_BUILD_VOLUME_OI_RATIO", "0.35"))
+IV_EXPANSION_RATIO = float(os.getenv("OPTIONS_IV_EXPANSION_RATIO", "1.15"))
+DELTA_IMBALANCE_RATIO = float(os.getenv("OPTIONS_DELTA_IMBALANCE_RATIO", "1.75"))
+GAMMA_SQUEEZE_MIN_SCORE = int(os.getenv("OPTIONS_GAMMA_SQUEEZE_MIN_SCORE", "70"))
 
 
 @dataclass
@@ -38,6 +53,40 @@ class OptionCandidate:
     volume: Optional[int]
     open_interest: Optional[int]
     status: str
+    reason: str
+
+
+@dataclass
+class OptionsFlowSignal:
+    name: str
+    direction: str
+    severity: int
+    description: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OptionsFlowReport:
+    underlying: str
+    status: str
+    score: int
+    bias: str
+    call_premium: float
+    put_premium: float
+    call_volume: int
+    put_volume: int
+    call_open_interest: int
+    put_open_interest: int
+    net_delta: float
+    net_gamma: float
+    avg_iv: Optional[float]
+    iv_rank_proxy: Optional[float]
+    max_pain_proxy: Optional[float]
+    put_wall_strike: Optional[float]
+    call_wall_strike: Optional[float]
+    dealer_gamma_state: str
+    gamma_squeeze: bool
+    signals: list[OptionsFlowSignal]
     reason: str
 
 
@@ -66,6 +115,445 @@ def _spread_pct(bid: Optional[float], ask: Optional[float]) -> Optional[float]:
     if mid <= 0:
         return None
     return ((ask - bid) / mid) * 100
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _round_or_none(value: Optional[float], ndigits: int = 2) -> Optional[float]:
+    if value is None:
+        return None
+    return round(value, ndigits)
+
+
+def _option_type(details: dict[str, Any]) -> str:
+    return str(details.get("contract_type") or details.get("type") or "").lower()
+
+
+def _option_ticker(details: dict[str, Any]) -> str:
+    return str(details.get("ticker") or details.get("symbol") or "")
+
+
+def _expiration_date(details: dict[str, Any]) -> str:
+    return str(details.get("expiration_date") or "")
+
+
+def _strike(details: dict[str, Any]) -> float:
+    return _safe_float(details.get("strike_price"))
+
+
+def _mid_from_snapshot(item: dict[str, Any]) -> Optional[float]:
+    quote = item.get("last_quote", {}) or {}
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    if bid is not None and ask is not None:
+        return (_safe_float(bid) + _safe_float(ask)) / 2
+    day = item.get("day", {}) or {}
+    close = day.get("close") or day.get("last_price")
+    return _safe_float(close) if close is not None else None
+
+
+def _contract_notional(item: dict[str, Any]) -> float:
+    day = item.get("day", {}) or {}
+    volume = _safe_int(day.get("volume"))
+    mid = _mid_from_snapshot(item) or _safe_float(day.get("vwap"))
+    return volume * mid * 100 if mid else 0.0
+
+
+def _expiry_within(details: dict[str, Any], max_days: int) -> bool:
+    exp = _expiration_date(details)
+    if not exp:
+        return False
+    try:
+        dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
+    except ValueError:
+        return False
+    return 0 <= dte <= max_days
+
+
+class OptionsApiClient:
+    """Small Polygon/Massive-compatible REST client for options flow analytics."""
+
+    def __init__(self, api_key: Optional[str] = OPTIONS_API_KEY, base_url: str = OPTIONS_API_BASE_URL):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def get(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError("OPTIONS_API_KEY, MASSIVE_API_KEY, or POLYGON_API_KEY not set")
+
+        query = dict(params or {})
+        query.setdefault("apiKey", self.api_key)
+        response = requests.get(f"{self.base_url}{path}", params=query, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
+    def option_snapshots(self, underlying: str, **params: Any) -> list[dict[str, Any]]:
+        payload = self.get(f"/v3/snapshot/options/{underlying}", params=params)
+        return payload.get("results", []) or []
+
+    def option_trades(self, option_ticker: str, **params: Any) -> list[dict[str, Any]]:
+        payload = self.get(f"/v3/trades/{option_ticker}", params=params)
+        return payload.get("results", []) or []
+
+
+def _empty_flow_report(symbol: str, status: str, reason: str) -> OptionsFlowReport:
+    return OptionsFlowReport(
+        underlying=symbol,
+        status=status,
+        score=0,
+        bias="NEUTRAL",
+        call_premium=0.0,
+        put_premium=0.0,
+        call_volume=0,
+        put_volume=0,
+        call_open_interest=0,
+        put_open_interest=0,
+        net_delta=0.0,
+        net_gamma=0.0,
+        avg_iv=None,
+        iv_rank_proxy=None,
+        max_pain_proxy=None,
+        put_wall_strike=None,
+        call_wall_strike=None,
+        dealer_gamma_state="UNKNOWN",
+        gamma_squeeze=False,
+        signals=[],
+        reason=reason,
+    )
+
+
+def _fetch_flow_chain(symbol: str, client: OptionsApiClient) -> list[dict[str, Any]]:
+    chain: list[dict[str, Any]] = []
+    for contract_type in ("call", "put"):
+        try:
+            chain.extend(
+                client.option_snapshots(
+                    symbol,
+                    contract_type=contract_type,
+                    limit=250,
+                )
+            )
+        except Exception:
+            continue
+    return [item for item in chain if _expiry_within(item.get("details", {}) or {}, FLOW_EXPIRY_DAYS)]
+
+
+def _estimate_trade_notional(trade: dict[str, Any]) -> float:
+    price = _safe_float(trade.get("price") or trade.get("p"))
+    size = _safe_int(trade.get("size") or trade.get("s"))
+    return price * size * 100
+
+
+def _trade_timestamp(trade: dict[str, Any]) -> int:
+    return _safe_int(trade.get("sip_timestamp") or trade.get("participant_timestamp") or trade.get("t"))
+
+
+def _detect_aggressive_sweeps(
+    symbol: str,
+    chain: list[dict[str, Any]],
+    client: OptionsApiClient,
+) -> list[OptionsFlowSignal]:
+    """Flag large same-contract prints as sweep/block proxies from Polygon trades."""
+    signals: list[OptionsFlowSignal] = []
+    liquid = sorted(chain, key=_contract_notional, reverse=True)[:FLOW_TOP_CONTRACTS]
+
+    for item in liquid:
+        details = item.get("details", {}) or {}
+        ticker = _option_ticker(details)
+        contract_type = _option_type(details)
+        if not ticker or contract_type not in {"call", "put"}:
+            continue
+
+        try:
+            trades = client.option_trades(ticker, limit=FLOW_TRADE_LIMIT, order="desc", sort="timestamp")
+        except Exception:
+            continue
+
+        large_prints = [t for t in trades if _estimate_trade_notional(t) >= SWEEP_NOTIONAL_THRESHOLD]
+        if not large_prints:
+            continue
+
+        total_notional = sum(_estimate_trade_notional(t) for t in large_prints)
+        unique_timestamps = len({_trade_timestamp(t) for t in large_prints})
+        name = "aggressive_call_sweeps" if contract_type == "call" else "aggressive_put_sweeps"
+        direction = "BULLISH" if contract_type == "call" else "BEARISH"
+        severity = min(30, int(total_notional / SWEEP_NOTIONAL_THRESHOLD) * 5 + len(large_prints) * 3)
+        block_text = "block/sweep" if total_notional >= BLOCK_NOTIONAL_THRESHOLD else "sweep"
+        signals.append(
+            OptionsFlowSignal(
+                name=name,
+                direction=direction,
+                severity=max(10, severity),
+                description=f"Detected {len(large_prints)} large {contract_type} {block_text} prints on {ticker}.",
+                evidence={
+                    "contract": ticker,
+                    "prints": len(large_prints),
+                    "notional": round(total_notional, 2),
+                    "unique_timestamps": unique_timestamps,
+                },
+            )
+        )
+
+    return signals[:6]
+
+
+def analyze_options_flow(
+    symbol: str,
+    direction: Optional[str] = None,
+    client: Optional[OptionsApiClient] = None,
+) -> OptionsFlowReport:
+    """Build a true options flow/liquidity report for intraday or swing setups.
+
+    Uses Polygon/Massive-compatible options snapshots for IV, greeks, volume and OI,
+    and recent option trades for large-print sweep/block proxies. Historical OI is
+    not available in the real-time snapshot, so OI build is approximated with
+    volume/open-interest pressure and highlighted as a proxy.
+    """
+    api = client or OptionsApiClient()
+    if not api.configured:
+        return _empty_flow_report(symbol, "SKIP", "Options API key not set")
+
+    try:
+        chain = _fetch_flow_chain(symbol, api)
+    except Exception as exc:
+        return _empty_flow_report(symbol, "ERROR", f"Options flow fetch failed: {exc}")
+
+    if not chain:
+        return _empty_flow_report(symbol, "SKIP", "No option chain snapshots returned")
+
+    signals: list[OptionsFlowSignal] = []
+    call_premium = put_premium = 0.0
+    call_volume = put_volume = 0
+    call_oi = put_oi = 0
+    call_delta = put_delta = 0.0
+    call_gamma = put_gamma = 0.0
+    iv_values: list[float] = []
+    weighted_strikes: list[tuple[float, int]] = []
+    put_walls: dict[float, int] = {}
+    call_walls: dict[float, int] = {}
+
+    for item in chain:
+        details = item.get("details", {}) or {}
+        contract_type = _option_type(details)
+        strike = _strike(details)
+        day = item.get("day", {}) or {}
+        greeks = item.get("greeks", {}) or {}
+
+        volume = _safe_int(day.get("volume"))
+        oi = _safe_int(item.get("open_interest"))
+        mid = _mid_from_snapshot(item)
+        notional = volume * (mid or 0.0) * 100
+        delta = _safe_float(greeks.get("delta"))
+        gamma = _safe_float(greeks.get("gamma"))
+        iv = item.get("implied_volatility")
+
+        if iv is not None:
+            iv_values.append(_safe_float(iv))
+        if strike and oi:
+            weighted_strikes.append((strike, oi))
+
+        if contract_type == "call":
+            call_premium += notional
+            call_volume += volume
+            call_oi += oi
+            call_delta += abs(delta) * volume * 100
+            call_gamma += abs(gamma) * oi * 100
+            call_walls[strike] = call_walls.get(strike, 0) + oi
+        elif contract_type == "put":
+            put_premium += notional
+            put_volume += volume
+            put_oi += oi
+            put_delta += abs(delta) * volume * 100
+            put_gamma += abs(gamma) * oi * 100
+            put_walls[strike] = put_walls.get(strike, 0) + oi
+
+        if oi and volume / max(oi, 1) >= OI_BUILD_VOLUME_OI_RATIO and volume >= MIN_OPTION_VOLUME:
+            dir_name = "BULLISH" if contract_type == "call" else "BEARISH"
+            signals.append(
+                OptionsFlowSignal(
+                    name="oi_build_proxy",
+                    direction=dir_name,
+                    severity=min(18, int((volume / max(oi, 1)) * 10)),
+                    description=f"{contract_type.upper()} volume/OI pressure suggests fresh positioning near {strike}.",
+                    evidence={"strike": strike, "volume": volume, "open_interest": oi, "volume_oi_ratio": round(volume / max(oi, 1), 2)},
+                )
+            )
+
+    put_wall_strike, put_wall_oi = max(put_walls.items(), key=lambda x: x[1], default=(None, 0))
+    call_wall_strike, call_wall_oi = max(call_walls.items(), key=lambda x: x[1], default=(None, 0))
+
+    if put_wall_strike is not None and put_wall_oi >= PUT_WALL_OI_THRESHOLD:
+        signals.append(
+            OptionsFlowSignal(
+                name="put_wall",
+                direction="SUPPORT",
+                severity=min(20, int(put_wall_oi / PUT_WALL_OI_THRESHOLD) * 5 + 8),
+                description=f"Large put wall detected at {put_wall_strike}.",
+                evidence={"strike": put_wall_strike, "open_interest": put_wall_oi},
+            )
+        )
+    if call_wall_strike is not None and call_wall_oi >= CALL_WALL_OI_THRESHOLD:
+        signals.append(
+            OptionsFlowSignal(
+                name="call_wall",
+                direction="RESISTANCE",
+                severity=min(20, int(call_wall_oi / CALL_WALL_OI_THRESHOLD) * 5 + 8),
+                description=f"Large call wall detected at {call_wall_strike}.",
+                evidence={"strike": call_wall_strike, "open_interest": call_wall_oi},
+            )
+        )
+
+    avg_iv = sum(iv_values) / len(iv_values) if iv_values else None
+    iv_rank_proxy = None
+    if avg_iv is not None:
+        # Snapshot-only proxy: above normal when the chain average exceeds the configured max IV guardrail ratio.
+        iv_rank_proxy = avg_iv / max(MAX_IV, 0.01)
+        if iv_rank_proxy >= IV_EXPANSION_RATIO / max(1.0, MAX_IV):
+            signals.append(
+                OptionsFlowSignal(
+                    name="iv_expansion",
+                    direction="VOLATILITY",
+                    severity=min(18, int(iv_rank_proxy * 10)),
+                    description="Chain IV is elevated versus configured IV guardrail, confirming volatility expansion risk.",
+                    evidence={"avg_iv": round(avg_iv, 4), "iv_rank_proxy": round(iv_rank_proxy, 3)},
+                )
+            )
+
+    delta_total = call_delta + put_delta
+    net_delta = call_delta - put_delta
+    delta_ratio = max(call_delta, put_delta) / max(min(call_delta, put_delta), 1)
+    if delta_total and delta_ratio >= DELTA_IMBALANCE_RATIO:
+        imbalance_direction = "BULLISH" if call_delta > put_delta else "BEARISH"
+        signals.append(
+            OptionsFlowSignal(
+                name="delta_imbalance",
+                direction=imbalance_direction,
+                severity=min(22, int(delta_ratio * 5)),
+                description=f"{imbalance_direction.lower()} delta imbalance detected across active contracts.",
+                evidence={"call_delta": round(call_delta, 2), "put_delta": round(put_delta, 2), "ratio": round(delta_ratio, 2)},
+            )
+        )
+
+    try:
+        signals.extend(_detect_aggressive_sweeps(symbol, chain, api))
+    except Exception:
+        pass
+
+    total_gamma = call_gamma + put_gamma
+    net_gamma = call_gamma - put_gamma
+    dealer_gamma_state = "LONG_GAMMA" if net_gamma >= 0 else "SHORT_GAMMA"
+    bullish_pressure = sum(s.severity for s in signals if s.direction in {"BULLISH", "SUPPORT", "VOLATILITY"})
+    bearish_pressure = sum(s.severity for s in signals if s.direction in {"BEARISH", "RESISTANCE", "VOLATILITY"})
+    premium_pressure = 0
+    if call_premium or put_premium:
+        premium_ratio = call_premium / max(put_premium, 1)
+        premium_pressure = 12 if premium_ratio >= DELTA_IMBALANCE_RATIO else -12 if (1 / max(premium_ratio, 0.01)) >= DELTA_IMBALANCE_RATIO else 0
+
+    squeeze_raw = bullish_pressure + max(0, premium_pressure) + (10 if dealer_gamma_state == "SHORT_GAMMA" else 0)
+    gamma_squeeze = squeeze_raw >= GAMMA_SQUEEZE_MIN_SCORE and call_volume > put_volume and call_delta > put_delta
+    if gamma_squeeze:
+        signals.append(
+            OptionsFlowSignal(
+                name="gamma_squeeze_conditions",
+                direction="BULLISH",
+                severity=25,
+                description="Call demand, elevated gamma exposure, and short-gamma dealer state create squeeze conditions.",
+                evidence={"squeeze_raw": squeeze_raw, "net_gamma": round(net_gamma, 2), "total_gamma": round(total_gamma, 2)},
+            )
+        )
+        bullish_pressure += 25
+
+    directional_score = bullish_pressure - bearish_pressure + premium_pressure
+    if direction == "CALL":
+        score = 50 + directional_score
+    elif direction == "PUT":
+        score = 50 - directional_score
+    else:
+        score = 50 + abs(directional_score)
+    score = int(max(0, min(100, score)))
+
+    if directional_score > 10:
+        bias = "BULLISH"
+    elif directional_score < -10:
+        bias = "BEARISH"
+    else:
+        bias = "NEUTRAL"
+
+    max_pain_proxy = None
+    if weighted_strikes:
+        total_oi = sum(oi for _, oi in weighted_strikes)
+        max_pain_proxy = sum(strike * oi for strike, oi in weighted_strikes) / max(total_oi, 1)
+
+    reason = (
+        f"Options flow bias {bias}; score {score}; call premium ${call_premium:,.0f} vs "
+        f"put premium ${put_premium:,.0f}; dealer gamma {dealer_gamma_state}."
+    )
+
+    return OptionsFlowReport(
+        underlying=symbol,
+        status="OK",
+        score=score,
+        bias=bias,
+        call_premium=round(call_premium, 2),
+        put_premium=round(put_premium, 2),
+        call_volume=call_volume,
+        put_volume=put_volume,
+        call_open_interest=call_oi,
+        put_open_interest=put_oi,
+        net_delta=round(net_delta, 2),
+        net_gamma=round(net_gamma, 2),
+        avg_iv=_round_or_none(avg_iv, 4),
+        iv_rank_proxy=_round_or_none(iv_rank_proxy, 3),
+        max_pain_proxy=_round_or_none(max_pain_proxy, 2),
+        put_wall_strike=put_wall_strike,
+        call_wall_strike=call_wall_strike,
+        dealer_gamma_state=dealer_gamma_state,
+        gamma_squeeze=gamma_squeeze,
+        signals=sorted(signals, key=lambda s: s.severity, reverse=True)[:12],
+        reason=reason,
+    )
+
+
+def options_flow_to_dict(report: OptionsFlowReport) -> dict[str, Any]:
+    data = asdict(report)
+    data["signals"] = [asdict(signal) for signal in report.signals]
+    return data
+
+
+def format_options_flow(report: OptionsFlowReport) -> str:
+    if report.status != "OK":
+        return f"🧨 Options Flow: {report.status} - {report.reason}"
+
+    top_signals = ", ".join(signal.name for signal in report.signals[:4]) or "none"
+    return (
+        f"🧨 *Options Flow:* {report.bias} {report.score}/100 | Gamma: {report.dealer_gamma_state} | "
+        f"Squeeze: {report.gamma_squeeze}\n"
+        f"💵 *Premium:* Calls ${report.call_premium:,.0f} / Puts ${report.put_premium:,.0f} | "
+        f"Δ Net {report.net_delta:,.0f}\n"
+        f"🧱 *Walls:* Put {report.put_wall_strike or 'n/a'} / Call {report.call_wall_strike or 'n/a'} | "
+        f"IV {report.avg_iv if report.avg_iv is not None else 'n/a'} | MaxPain≈{report.max_pain_proxy or 'n/a'}\n"
+        f"🔎 *Signals:* {top_signals}"
+    )
 
 
 def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:

@@ -764,6 +764,7 @@ OPENAI_REASONING_MODEL=gpt-5.5
 OPENAI_REASONING_EFFORT=medium
 OPENAI_VISION_MODEL=gpt-5.5
 POLYGON_API_KEY=
+AUTO_WATCHLIST_DATE=        # Optional YYYY-MM-DD; uses Polygon historical active movers for that day
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
 ALPACA_API_KEY=
@@ -842,7 +843,7 @@ MAX_OPTION_DTE=45
 - Requires historical logs for ML improvement.
 - Works best during active market sessions.
 - Swing analysis can run after hours and can fall back to daily-only context.
-- Auto watchlist discovery requires Polygon snapshot access.
+- Auto watchlist discovery uses Polygon live snapshots by default; set `AUTO_WATCHLIST_DATE=YYYY-MM-DD` to build the active mover watchlist for a specific historical trading day from Polygon reference tickers plus grouped daily aggregates.
 - Options-flow scoring depends on provider snapshot fields and should be treated as a proxy, not a complete tape feed.
 - Price projections and estimated option premium moves are probabilistic estimates, not guarantees.
 - AI vision requires TradingView pages to load successfully in the local browser environment.

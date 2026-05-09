@@ -4,7 +4,7 @@ from polygon import RESTClient
 import datetime as dt
 import time
 import requests
-from typing import List
+from typing import List, Optional, Union
 
 from bot_utils import safe_float, pct_diff
 
@@ -22,18 +22,127 @@ class StockTechnicalBase:
         self.market_bias_cache = None
         self.market_bias_cache_time = 0
 
-    def get_auto_watchlist(self) -> List[str]:
+    def _parse_watchlist_day(self, day: Optional[Union[str, dt.date, dt.datetime]] = None) -> Optional[dt.date]:
+        if day is None:
+            configured_day = globals().get("AUTO_WATCHLIST_DATE", "")
+            day = configured_day or None
+
+        if day is None:
+            return None
+
+        if isinstance(day, dt.datetime):
+            return day.date()
+
+        if isinstance(day, dt.date):
+            return day
+
+        if isinstance(day, str):
+            raw = day.strip()
+            if not raw:
+                return None
+            return dt.date.fromisoformat(raw)
+
+        raise TypeError("watchlist day must be a YYYY-MM-DD string, date, datetime, or None")
+
+    def _merge_auto_watchlist(self, auto: List[str], label: str) -> List[str]:
+        final = list(dict.fromkeys(self.base_tickers + auto))
+
+        for t in final:
+            if t not in self.state:
+                self.state[t] = {"last_alert_time": {}}
+
+        print(f"📌 Auto watchlist size: {len(final)} ({label})")
+        return final
+
+    def _request_polygon_json(self, url: str, params=None):
+        params = dict(params or {})
+        if "apiKey" not in params and "apiKey=" not in url:
+            params["apiKey"] = POLYGON_API_KEY
+
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        return r.json()
+
+    def get_active_tickers_for_day(self, day: Union[str, dt.date, dt.datetime]) -> set:
+        parsed_day = self._parse_watchlist_day(day)
+        if parsed_day is None:
+            return set()
+
+        url = "https://api.polygon.io/v3/reference/tickers"
+        params = {
+            "market": "stocks",
+            "locale": "us",
+            "active": "true",
+            "date": parsed_day.isoformat(),
+            "limit": 1000,
+            "sort": "ticker",
+        }
+
+        tickers = set()
+        while url:
+            data = self._request_polygon_json(url, params=params)
+            for item in data.get("results", []):
+                ticker = item.get("ticker")
+                if ticker:
+                    tickers.add(ticker)
+
+            url = data.get("next_url")
+            params = None
+
+        return tickers
+
+    def get_historical_auto_watchlist(self, day: Union[str, dt.date, dt.datetime]) -> List[str]:
+        parsed_day = self._parse_watchlist_day(day)
+        if parsed_day is None:
+            return self.base_tickers
+
+        active_tickers = self.get_active_tickers_for_day(parsed_day)
+        url = (
+            "https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/"
+            f"{parsed_day.isoformat()}"
+        )
+        data = self._request_polygon_json(url, params={"adjusted": "true"})
+        movers = []
+
+        for item in data.get("results", []):
+            ticker = item.get("T")
+            if active_tickers and ticker not in active_tickers:
+                continue
+
+            open_price = safe_float(item.get("o"))
+            close_price = safe_float(item.get("c"))
+            high_price = safe_float(item.get("h"))
+            volume = safe_float(item.get("v"))
+            price = close_price or high_price
+            change_pct = abs(pct_diff(close_price, open_price) or 0)
+
+            if price < MIN_STOCK_PRICE:
+                continue
+
+            if ticker and volume >= MIN_AUTO_VOLUME and change_pct >= MIN_AUTO_CHANGE_PCT:
+                movers.append((ticker, change_pct, volume, price))
+
+        movers.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
+
+        auto = [x[0] for x in movers[:AUTO_WATCHLIST_LIMIT]]
+        return self._merge_auto_watchlist(auto, parsed_day.isoformat())
+
+    def get_auto_watchlist(self, day: Optional[Union[str, dt.date, dt.datetime]] = None) -> List[str]:
+        parsed_day = self._parse_watchlist_day(day)
         if not USE_AUTO_WATCHLIST:
             return self.base_tickers
 
-        url = (
-            "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
-            f"?apiKey={POLYGON_API_KEY}"
-        )
+        if parsed_day is not None:
+            try:
+                return self.get_historical_auto_watchlist(parsed_day)
+            except Exception as e:
+                print(f"Historical auto-watchlist error for {parsed_day}: {e}")
+                return self.base_tickers
+
+        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
 
         try:
-            r = requests.get(url, timeout=20)
-            data = r.json()
+            data = self._request_polygon_json(url)
             movers = []
 
             for item in data.get("tickers", []):
@@ -54,14 +163,7 @@ class StockTechnicalBase:
             movers.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
 
             auto = [x[0] for x in movers[:AUTO_WATCHLIST_LIMIT]]
-            final = list(dict.fromkeys(self.base_tickers + auto))
-
-            for t in final:
-                if t not in self.state:
-                    self.state[t] = {"last_alert_time": {}}
-
-            print(f"📌 Auto watchlist size: {len(final)}")
-            return final
+            return self._merge_auto_watchlist(auto, "snapshot")
 
         except Exception as e:
             print(f"Auto-watchlist error: {e}")

@@ -4,6 +4,7 @@ from bot_utils import safe_float
 def predict_2day_move(tech: dict, reasoning: dict | None = None) -> dict:
     tech = tech or {}
     reasoning = reasoning or {}
+    previous_projection = reasoning.get("previous_projection") or tech.get("previous_projection") or {}
 
     price = safe_float(tech.get('price'))
     atr = safe_float(tech.get('atr14') or tech.get('atr'))
@@ -58,6 +59,21 @@ def predict_2day_move(tech: dict, reasoning: dict | None = None) -> dict:
 
     confidence = min(max(abs(bullish_score - bearish_score) + 55, 50), 95)
 
+    prior_confidence = safe_float(previous_projection.get("confidence"), None)
+    projection_decay = 0
+    if prior_confidence is not None:
+        projection_decay = max(0, min(100, prior_confidence - confidence))
+
+    prior_direction = str(previous_projection.get("direction", "")).upper()
+    direction_flip = bool(
+        prior_direction
+        and prior_direction != "SIDEWAYS"
+        and direction != "SIDEWAYS"
+        and prior_direction != direction
+    )
+    if direction_flip:
+        projection_decay = max(projection_decay, 65)
+
     move_low = round((atr / price) * 100 * 1.2, 2)
     move_high = round((atr / price) * 100 * 2.5, 2)
 
@@ -86,4 +102,6 @@ def predict_2day_move(tech: dict, reasoning: dict | None = None) -> dict:
         'expected_price_range': [low_price, high_price],
         'hold_guidance': hold_guidance,
         'risk': risk,
+        'projection_decay': round(projection_decay, 2),
+        'direction_flip': direction_flip,
     }

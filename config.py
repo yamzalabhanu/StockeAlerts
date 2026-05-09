@@ -81,8 +81,11 @@ BASE_WATCHLIST = list(dict.fromkeys(
 ))
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---
-# StockTechnicalBase.get_auto_watchlist() merges today's Polygon movers with BASE_WATCHLIST.
+# StockTechnicalBase.get_auto_watchlist() merges Polygon movers with BASE_WATCHLIST.
+# Leave AUTO_WATCHLIST_DATE empty for the live snapshot, or set YYYY-MM-DD to scan
+# tickers that were active on that historical trading day.
 USE_AUTO_WATCHLIST = True
+AUTO_WATCHLIST_DATE = os.getenv("AUTO_WATCHLIST_DATE", "").strip()
 AUTO_WATCHLIST_LIMIT = 40
 MIN_AUTO_VOLUME = 2_000_000
 MIN_AUTO_CHANGE_PCT = 2.0

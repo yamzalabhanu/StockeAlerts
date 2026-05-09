@@ -147,6 +147,17 @@ The options layer evaluates:
 - Implied volatility
 - Volume and open interest
 
+The true options flow and liquidity engine can also use Polygon/Massive-compatible options APIs to score explosive intraday and swing conditions:
+
+- Aggressive call / put sweeps and large block-print proxies
+- Put and call OI walls
+- Fresh OI-build pressure via volume/open-interest ratios
+- Dealer gamma state and gamma-squeeze conditions
+- IV expansion proxies
+- Delta imbalance and call/put premium imbalance
+
+Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, and `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`.
+
 Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
 
 ---

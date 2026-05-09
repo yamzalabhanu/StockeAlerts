@@ -625,6 +625,17 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f"({setup.get('confidence_adjustment', 0):+.1f})\n"
     )
 
+    options_flow = setup.get("options_flow") or {}
+    options_flow_line = ""
+    if options_flow:
+        flow_signals = options_flow.get("signals") or []
+        top_signals = ", ".join(str(s.get("name")) for s in flow_signals[:3] if isinstance(s, dict)) or "none"
+        options_flow_line = (
+            f"🧨 Options Flow: {options_flow.get('bias')} {options_flow.get('score')}/100 | "
+            f"Gamma {options_flow.get('dealer_gamma_state')} | Squeeze {options_flow.get('gamma_squeeze')} | "
+            f"Signals {top_signals}\n"
+        )
+
     return (
         f'{emoji} *{setup.get("tier", "WATCH")} '
         f'SWING {setup.get("direction", "CALL")} '
@@ -637,6 +648,7 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f'🛑 Stop: {setup.get("stop", "?")}\n'
         f'🚀 Target: {setup.get("target", "?")}\n'
         f'📐 RR: {setup.get("risk_reward", "?")}:1\n'
+        f"{options_flow_line}"
         f'📝 Reasons: {", ".join(setup.get("reasons", []))}\n'
         f'🧠 AI Decision: '
         f'{reasoning.get("decision", setup.get("tier", "WATCH"))}\n'

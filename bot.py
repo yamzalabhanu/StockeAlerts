@@ -19,6 +19,7 @@ from ai_scoring import ai_score_setup
 from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
+from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -43,7 +44,7 @@ def log_alert(row: Dict[str, Any]):
         "premarket_high", "premarket_low", "prev_high", "prev_low",
         "current_volume", "avg_20_volume",
         "intraday_confirmations", "intraday_required", "intraday_reason",
-        "market_bias", "market_details", "market_regime", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons",
+        "market_bias", "market_details", "market_regime", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons", "options_flow_bias", "options_flow_score", "options_flow_gamma_squeeze",
     ]
 
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
@@ -402,6 +403,22 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         if best.get("retest_confirmed"):
             ranking_score += 10
 
+        options_flow = None
+        try:
+            options_flow = analyze_options_flow(ticker, best.get("direction"))
+            best["options_flow"] = options_flow_to_dict(options_flow)
+            if options_flow.status == "OK":
+                if options_flow.bias == "BULLISH" and best.get("direction") == "CALL":
+                    ranking_score += options_flow.score * 0.25
+                elif options_flow.bias == "BEARISH" and best.get("direction") == "PUT":
+                    ranking_score += options_flow.score * 0.25
+                elif options_flow.bias in {"BULLISH", "BEARISH"}:
+                    ranking_score -= 15
+                if options_flow.gamma_squeeze and best.get("direction") == "CALL":
+                    ranking_score += 15
+        except Exception as e:
+            print(f"{ticker}: options flow skipped: {e}")
+
         return {
             "ticker": ticker,
             "setup": best,
@@ -413,6 +430,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "ranking_score": ranking_score,
             "learning_context": learning_context,
             "historical_priority_bonus": historical_priority_bonus,
+            "options_flow": options_flow,
         }
 
     async def check_ticker(self, ticker):
@@ -425,7 +443,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             print(f"{ticker}: error {e}")
             return None
 
-    def alert(self, ticker, setup, tech, ai, intraday_info=None, entry_mode="STANDARD", mode_reason="", ranking_score=0):
+    def alert(self, ticker, setup, tech, ai, intraday_info=None, entry_mode="STANDARD", mode_reason="", ranking_score=0, options_flow=None):
         direction = setup["direction"]
         emoji = "🟢" if direction == "CALL" else "🔴"
         market = self.get_market_bias()
@@ -437,6 +455,22 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         learning_stats = ai.get("learning_stats") or learning_confidence.get("learning_stats") or {}
         priority = reasoning.get("priority_bonus", 0)
         setup_key = learning_context.get("setup_key") or setup_structure_key({"alert_type": "INTRADAY", "entry_mode": entry_mode, "direction": direction})
+        options_flow = options_flow or setup.get("options_flow")
+        options_flow_text = ""
+        if options_flow:
+            if isinstance(options_flow, dict):
+                flow_signals = options_flow.get("signals") or []
+                top_signals = ", ".join(str(s.get("name")) for s in flow_signals[:4] if isinstance(s, dict)) or "none"
+                options_flow_text = (
+                    f"\n🧨 *Options Flow:* {options_flow.get('bias')} {options_flow.get('score')}/100 | "
+                    f"Gamma: {options_flow.get('dealer_gamma_state')} | Squeeze: {options_flow.get('gamma_squeeze')}\n"
+                    f"💵 *Premium:* Calls ${float(options_flow.get('call_premium') or 0):,.0f} / "
+                    f"Puts ${float(options_flow.get('put_premium') or 0):,.0f} | Δ Net {float(options_flow.get('net_delta') or 0):,.0f}\n"
+                    f"🧱 *Walls:* Put {options_flow.get('put_wall_strike') or 'n/a'} / "
+                    f"Call {options_flow.get('call_wall_strike') or 'n/a'} | Signals: {top_signals}\n"
+                )
+            else:
+                options_flow_text = "\n" + format_options_flow(options_flow) + "\n"
 
         msg = (
             f"{emoji} *{entry_mode} {direction} SETUP: {ticker}*\n"
@@ -461,7 +495,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🟦 *ORB H/L:* {fmt_price(tech['orb_high'])} / {fmt_price(tech['orb_low'])}\n"
             f"🌅 *PM H/L:* {fmt_price(tech['premarket_high'])} / {fmt_price(tech['premarket_low'])}\n"
             f"📆 *PD H/L:* {fmt_price(tech['prev_high'])} / {fmt_price(tech['prev_low'])}\n"
-            f"📊 *Vol:* {tech['current_volume']} / Avg20 {tech['avg_20_volume']}\n\n"
+            f"📊 *Vol:* {tech['current_volume']} / Avg20 {tech['avg_20_volume']}\n"
+            f"{options_flow_text}\n"
             f"🔥 *Retest:* {ai['retest_confirmed']}\n"
             f"⚠️ *Late Risk:* {ai['late_breakout_risk']}\n\n"
             f"📝 *AI Reason:* {ai['reason']}\n\n"
@@ -525,6 +560,9 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "forecast_accuracy": learning_stats.get("forecast_accuracy"),
             "priority_bonus": priority,
             "reasons": ", ".join(setup.get("reasons", [])),
+            "options_flow_bias": (options_flow.get("bias") if isinstance(options_flow, dict) else getattr(options_flow, "bias", None)),
+            "options_flow_score": (options_flow.get("score") if isinstance(options_flow, dict) else getattr(options_flow, "score", None)),
+            "options_flow_gamma_squeeze": (options_flow.get("gamma_squeeze") if isinstance(options_flow, dict) else getattr(options_flow, "gamma_squeeze", None)),
         })
 
         if ai["entry"] and ai["stop"] and ai["target"]:
@@ -596,6 +634,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                         c.get("entry_mode", "STANDARD"),
                         c.get("mode_reason", ""),
                         c["ranking_score"],
+                        c.get("options_flow"),
                     )
                     self.mark_alert(c["ticker"], c["setup"]["direction"])
 

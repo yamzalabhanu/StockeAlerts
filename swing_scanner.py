@@ -719,6 +719,7 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
     )
 
     options_flow = setup.get("options_flow") or {}
+    option_contract = setup.get("option_contract") or {}
     options_flow_line = ""
     if options_flow:
         flow_signals = options_flow.get("signals") or []
@@ -728,6 +729,18 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
             f"Gamma {options_flow.get('dealer_gamma_state')} | Squeeze {options_flow.get('gamma_squeeze')} | "
             f"Signals {top_signals}\n"
         )
+
+    option_contract_line = ""
+    if option_contract:
+        if option_contract.get("status") == "OK":
+            option_contract_line = (
+                f"🎯 Option Pick: {option_contract.get('contract_symbol')} | "
+                f"Score {option_contract.get('recommendation_score')} | "
+                f"Vol/OI {option_contract.get('volume')}/{option_contract.get('open_interest')} "
+                f"({option_contract.get('volume_oi_ratio')}) | Mid {option_contract.get('mid')}\n"
+            )
+        else:
+            option_contract_line = f"🎯 Option Pick: SKIP - {option_contract.get('reason')}\n"
 
     return (
 
@@ -743,6 +756,7 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f'🚀 Target: {setup.get("target", "?")}\n'
         f'📐 RR: {setup.get("risk_reward", "?")}:1\n'
         f"{options_flow_line}"
+        f"{option_contract_line}"
         f'📝 Reasons: {", ".join(setup.get("reasons", []))}\n'
         f'🧠 AI Decision: '
         f'{reasoning.get("decision", setup.get("tier", "WATCH"))}\n'

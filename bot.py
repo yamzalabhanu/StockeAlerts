@@ -12,6 +12,7 @@ from typing import Dict, Any
 
 from bot_technical import StockTechnicalBase
 from bot_utils import fmt_price, extract_gpt_json, normalize_ai_response
+from openai_models import chat_completion_options
 from outcome_tracker import track_outcome
 from chart_capture import capture_chart
 from intraday_confirm import intraday_confirmation
@@ -19,7 +20,7 @@ from ai_scoring import ai_score_setup
 from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
-from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict
+from options_engine import analyze_options_flow, format_options_flow, format_option_alert, option_to_dict, options_flow_to_dict, select_option_contract
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -230,8 +231,7 @@ Return ONLY valid JSON:
 
         try:
             r = ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,
+                **chat_completion_options(temperature=0.1),
                 messages=[
                     {
                         "role": "system",
@@ -271,8 +271,7 @@ Intraday Confirmation: {intraday_info}
 Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_reward, setup_quality, entry_timing, retest_confirmed, late_breakout_risk, reason.
 """
             response = ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,
+                **chat_completion_options(temperature=0.1),
                 messages=[
                     {"role": "system", "content": "Use the chart to confirm structure. Reject chop, fakeouts, and late extensions."},
                     {
@@ -416,8 +415,16 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     ranking_score -= 15
                 if options_flow.gamma_squeeze and best.get("direction") == "CALL":
                     ranking_score += 15
+
+            option_contract = select_option_contract(
+                ticker,
+                {"signal": best.get("direction"), "price": tech.get("price")},
+            )
+            best["option_contract"] = option_to_dict(option_contract)
+            if option_contract.status == "OK":
+                ranking_score += min(10, (option_contract.recommendation_score or 0) * 0.08)
         except Exception as e:
-            print(f"{ticker}: options flow skipped: {e}")
+            print(f"{ticker}: options flow/contract selection skipped: {e}")
 
         return {
             "ticker": ticker,
@@ -456,6 +463,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         priority = reasoning.get("priority_bonus", 0)
         setup_key = learning_context.get("setup_key") or setup_structure_key({"alert_type": "INTRADAY", "entry_mode": entry_mode, "direction": direction})
         options_flow = options_flow or setup.get("options_flow")
+        option_contract = setup.get("option_contract")
         options_flow_text = ""
         if options_flow:
             if isinstance(options_flow, dict):
@@ -471,6 +479,22 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 )
             else:
                 options_flow_text = "\n" + format_options_flow(options_flow) + "\n"
+
+        option_contract_text = ""
+        if option_contract:
+            if isinstance(option_contract, dict):
+                if option_contract.get("status") == "OK":
+                    option_contract_text = (
+                        f"\n🎯 *Option Pick:* {option_contract.get('contract_symbol')} | "
+                        f"Score {option_contract.get('recommendation_score')} | "
+                        f"Vol/OI {option_contract.get('volume')}/{option_contract.get('open_interest')} "
+                        f"({option_contract.get('volume_oi_ratio')}) | "
+                        f"Mid {option_contract.get('mid')}\n"
+                    )
+                else:
+                    option_contract_text = f"\n🎯 *Option Pick:* SKIP - {option_contract.get('reason')}\n"
+            else:
+                option_contract_text = "\n" + format_option_alert(option_contract) + "\n"
 
         msg = (
             f"{emoji} *{entry_mode} {direction} SETUP: {ticker}*\n"
@@ -496,7 +520,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🌅 *PM H/L:* {fmt_price(tech['premarket_high'])} / {fmt_price(tech['premarket_low'])}\n"
             f"📆 *PD H/L:* {fmt_price(tech['prev_high'])} / {fmt_price(tech['prev_low'])}\n"
             f"📊 *Vol:* {tech['current_volume']} / Avg20 {tech['avg_20_volume']}\n"
-            f"{options_flow_text}\n"
+            f"{options_flow_text}"
+            f"{option_contract_text}\n"
             f"🔥 *Retest:* {ai['retest_confirmed']}\n"
             f"⚠️ *Late Risk:* {ai['late_breakout_risk']}\n\n"
             f"📝 *AI Reason:* {ai['reason']}\n\n"

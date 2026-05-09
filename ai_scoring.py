@@ -1,5 +1,6 @@
 from openai import OpenAI
 from config import OPENAI_API_KEY
+from openai_models import chat_completion_options
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -23,9 +24,10 @@ Return ONLY a number.
 
     try:
         res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}]
+            **chat_completion_options(
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
+            )
         )
         return int(res.choices[0].message.content.strip())
     except Exception:

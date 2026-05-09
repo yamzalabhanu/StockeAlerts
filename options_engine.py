@@ -20,7 +20,7 @@ MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
 TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
 TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
-MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "21"))
+MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "45"))
 
 FLOW_EXPIRY_DAYS = int(os.getenv("OPTIONS_FLOW_EXPIRY_DAYS", "45"))
 FLOW_TOP_CONTRACTS = int(os.getenv("OPTIONS_FLOW_TOP_CONTRACTS", "24"))
@@ -174,9 +174,34 @@ def _mid_from_snapshot(item: dict[str, Any]) -> Optional[float]:
     return _safe_float(close) if close is not None else None
 
 
+def _snapshot_volume(item: dict[str, Any]) -> int:
+    """Return same-day option volume across Polygon/Massive-compatible fields."""
+    day = item.get("day", {}) or {}
+    return _safe_int(
+        day.get("volume")
+        or day.get("v")
+        or item.get("volume")
+        or item.get("day_volume")
+        or item.get("total_volume")
+    )
+
+
+def _snapshot_open_interest(item: dict[str, Any]) -> int:
+    """Return open interest across common snapshot/provider field aliases."""
+    details = item.get("details", {}) or {}
+    return _safe_int(
+        item.get("open_interest")
+        or item.get("openInterest")
+        or item.get("oi")
+        or details.get("open_interest")
+        or details.get("openInterest")
+        or details.get("oi")
+    )
+
+
 def _contract_notional(item: dict[str, Any]) -> float:
     day = item.get("day", {}) or {}
-    volume = _safe_int(day.get("volume"))
+    volume = _snapshot_volume(item)
     mid = _mid_from_snapshot(item) or _safe_float(day.get("vwap"))
     return volume * mid * 100 if mid else 0.0
 
@@ -362,11 +387,10 @@ def analyze_options_flow(
         details = item.get("details", {}) or {}
         contract_type = _option_type(details)
         strike = _strike(details)
-        day = item.get("day", {}) or {}
         greeks = item.get("greeks", {}) or {}
 
-        volume = _safe_int(day.get("volume"))
-        oi = _safe_int(item.get("open_interest"))
+        volume = _snapshot_volume(item)
+        oi = _snapshot_open_interest(item)
         mid = _mid_from_snapshot(item)
         notional = volume * (mid or 0.0) * 100
         delta = _safe_float(greeks.get("delta"))
@@ -671,9 +695,8 @@ def _candidate_from_chain_item(
     theta = greeks.get("theta")
     iv = item.get("implied_volatility")
 
-    day = item.get("day", {}) or {}
-    volume = _safe_int(day.get("volume"))
-    oi = _safe_int(item.get("open_interest"))
+    volume = _snapshot_volume(item)
+    oi = _snapshot_open_interest(item)
 
     if spread is not None and spread > MAX_SPREAD_PCT:
         return None, "spread"
@@ -729,6 +752,17 @@ def _candidate_from_chain_item(
     return candidate, None
 
 
+def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
+    """Rank candidates by actionable liquidity before moneyness convenience."""
+    return (
+        candidate.liquidity_score or 0.0,
+        candidate.volume or 0,
+        candidate.open_interest or 0,
+        candidate.dollar_volume or 0.0,
+        candidate.recommendation_score or 0.0,
+        -(candidate.spread_pct or MAX_SPREAD_PCT),
+    )
+
 def recommend_option_contracts_from_chain(
     symbol: str,
     option_chain: list[dict[str, Any]],
@@ -754,15 +788,7 @@ def recommend_option_contracts_from_chain(
         if candidate:
             candidates.append(candidate)
 
-    candidates.sort(
-        key=lambda c: (
-            c.recommendation_score or 0,
-            c.liquidity_score or 0,
-            c.open_interest or 0,
-            c.volume or 0,
-        ),
-        reverse=True,
-    )
+    candidates.sort(key=_option_candidate_rank, reverse=True)
     return candidates[:top_n]
 
 
@@ -792,7 +818,7 @@ def select_option_contract(
 
     expiries = _next_fridays()
     best: Optional[OptionCandidate] = None
-    best_score = -10**9
+    best_rank: tuple[float, ...] = (-1.0,)
     rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "delta": 0, "dte": 0}
 
     for expiry in expiries:
@@ -836,9 +862,8 @@ def select_option_contract(
             theta = greeks.get("theta")
             iv = item.get("implied_volatility")
 
-            day = item.get("day", {}) or {}
-            volume = _safe_int(day.get("volume"))
-            oi = _safe_int(item.get("open_interest"))
+            volume = _snapshot_volume(item)
+            oi = _snapshot_open_interest(item)
 
             if spread is not None and spread > MAX_SPREAD_PCT:
                 rejection_counts["spread"] += 1
@@ -868,36 +893,38 @@ def select_option_contract(
             )
 
             dollar_volume = volume * (mid or 0.0) * 100
-            if score > best_score:
-                best_score = score
-                best = OptionCandidate(
-                    underlying=symbol,
-                    contract_symbol=contract,
-                    option_type=option_type.upper(),
-                    strike=strike,
-                    expiry=exp,
-                    dte=dte,
-                    bid=bid_float,
-                    ask=ask_float,
-                    mid=round(mid, 2) if mid else None,
-                    spread_pct=round(spread, 2) if spread is not None else None,
-                    delta=round(_safe_float(delta), 3) if delta is not None else None,
-                    gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
-                    theta=round(_safe_float(theta), 4) if theta is not None else None,
-                    implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
-                    volume=volume,
-                    open_interest=oi,
-                    status="OK",
-                    reason=(
-                        "Recommended by Polygon/Massive snapshot liquidity: "
-                        f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
-                        f"{distance_pct * 100:.1f}% from spot."
-                    ),
-                    recommendation_score=round(score, 2),
-                    liquidity_score=round(liquidity_score, 2),
-                    volume_oi_ratio=round(volume_oi_ratio, 3),
-                    dollar_volume=round(dollar_volume, 2),
-                )
+            candidate = OptionCandidate(
+                underlying=symbol,
+                contract_symbol=contract,
+                option_type=option_type.upper(),
+                strike=strike,
+                expiry=exp,
+                dte=dte,
+                bid=bid_float,
+                ask=ask_float,
+                mid=round(mid, 2) if mid else None,
+                spread_pct=round(spread, 2) if spread is not None else None,
+                delta=round(_safe_float(delta), 3) if delta is not None else None,
+                gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
+                theta=round(_safe_float(theta), 4) if theta is not None else None,
+                implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
+                volume=volume,
+                open_interest=oi,
+                status="OK",
+                reason=(
+                    "Recommended by Polygon/Massive snapshot liquidity: "
+                    f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
+                    f"{distance_pct * 100:.1f}% from spot."
+                ),
+                recommendation_score=round(score, 2),
+                liquidity_score=round(liquidity_score, 2),
+                volume_oi_ratio=round(volume_oi_ratio, 3),
+                dollar_volume=round(dollar_volume, 2),
+            )
+            rank = _option_candidate_rank(candidate)
+            if rank > best_rank:
+                best_rank = rank
+                best = candidate
 
     if best:
         return best

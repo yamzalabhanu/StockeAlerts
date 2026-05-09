@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, Optional, Tuple
 
+from alert_formatting import format_predicted_price_move, format_recommended_option_contract
+
 import config
 from bot_utils import safe_float
 from performance_learning import default_learning_stats
@@ -637,17 +639,20 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
             f"Signals {top_signals}\n"
         )
 
+    predicted_move_line = format_predicted_price_move(
+        setup.get("direction"),
+        setup.get("entry"),
+        setup.get("target"),
+        setup.get("stop"),
+    )
     option_contract_line = ""
     if option_contract:
-        if option_contract.get("status") == "OK":
-            option_contract_line = (
-                f"🎯 Option Pick: {option_contract.get('contract_symbol')} | "
-                f"Score {option_contract.get('recommendation_score')} | "
-                f"Vol/OI {option_contract.get('volume')}/{option_contract.get('open_interest')} "
-                f"({option_contract.get('volume_oi_ratio')}) | Mid {option_contract.get('mid')}\n"
-            )
-        else:
-            option_contract_line = f"🎯 Option Pick: SKIP - {option_contract.get('reason')}\n"
+        option_contract_line = format_recommended_option_contract(
+            option_contract,
+            direction=setup.get("direction", ""),
+            entry=setup.get("entry"),
+            target=setup.get("target"),
+        ).lstrip("\n")
 
     return (
         f'{emoji} *{setup.get("tier", "WATCH")} '
@@ -660,6 +665,7 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
         f'🎯 Entry: {setup.get("entry", "?")}\n'
         f'🛑 Stop: {setup.get("stop", "?")}\n'
         f'🚀 Target: {setup.get("target", "?")}\n'
+        f"{predicted_move_line}"
         f'📐 RR: {setup.get("risk_reward", "?")}:1\n'
         f"{options_flow_line}"
         f"{option_contract_line}"

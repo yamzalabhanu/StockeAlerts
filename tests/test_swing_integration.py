@@ -82,6 +82,34 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["direction"], "CALL")
 
+
+    def test_process_swing_candidate_uses_entry_for_option_contract_price(self):
+        class Bot:
+            def send_telegram_msg(self, _message):
+                return True
+
+        class OptionContract:
+            status = "SKIP"
+            recommendation_score = 0
+
+        with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
+            patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.analyze_options_flow") as analyze_options_flow, \
+            patch("swing_integration.options_flow_to_dict", return_value={}), \
+            patch("swing_integration.select_option_contract", return_value=OptionContract()) as select_option_contract, \
+            patch("swing_integration.option_to_dict", return_value={"status": "SKIP"}), \
+            patch("swing_integration.log_swing_alert"), \
+            patch("swing_integration.track_outcome"), \
+            patch.dict("swing_integration.SWING_ALERT_CACHE", {}, clear=True):
+            analyze_options_flow.return_value.status = "SKIP"
+            analyze_options_flow.return_value.bias = "NEUTRAL"
+            process_swing_candidate(Bot(), "TEST", {})
+
+        select_option_contract.assert_called_once_with(
+            "TEST",
+            {"signal": "CALL", "price": 100},
+        )
+
     def test_swing_benchmark_rejects_ai_reject_risks(self):
         reasoning = self._reasoning()
         reasoning["reject_reasons"] = ["Setup failed elite quality filters"]

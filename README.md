@@ -8,6 +8,65 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧠 GPT-5.5 Reasoning Defaults
+
+AI-backed market analysis, alert gates, trade-management decisions, and chart-vision reads now default to `gpt-5.5`. Reasoning-capable models are configured through a shared OpenAI options helper that passes `reasoning_effort` instead of forcing low-temperature chat behavior, while non-reasoning model overrides can still use temperature settings.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `OPENAI_REASONING_MODEL` | Market-data reasoning model for AI alert decisions, defaults to `gpt-5.5` |
+| `OPENAI_REASONING_EFFORT` | Reasoning depth for GPT-5/o-series models, defaults to `medium` |
+| `OPENAI_VISION_MODEL` | Chart-vision model override, defaults to the reasoning model |
+
+---
+
+### 👁️ AI Vision Chart Reader
+
+StockeAlerts can capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read. The normalized visual reading can be attached to `tech["vision_chart"]` so chart-structure scoring, swing validation, and AI reasoning gates can account for visual context that numeric indicators often miss.
+
+The vision reader evaluates:
+
+- Failed breakouts and late chase risk
+- Volatility compression before expansion
+- Wedges and tightening structure
+- Exhaustion candles and rejection wicks
+- Trapped longs / trapped shorts
+- Liquidity grabs above resistance or below support
+- Overall trend quality: strong, healthy, mixed, choppy, or exhausted
+
+Example:
+
+```python
+from chart_ai import analyze_chart_vision
+
+vision = await analyze_chart_vision("NASDAQ:NVDA", analysis=tech, timeframe="D")
+tech["vision_chart"] = vision
+```
+
+Required browser setup for screenshot capture:
+
+```bash
+playwright install chromium
+```
+
+---
+
+### 🎯 High-Liquidity Options Contract Recommendations
+
+The options selector now ranks contracts by actionable liquidity before simple moneyness convenience. It scans Polygon/Massive-compatible option snapshots, applies DTE, spread, IV, delta, volume, and open-interest guardrails, then prioritizes contracts with the strongest same-day volume, open interest, volume/OI participation, dollar volume, and recommendation score.
+
+Telegram alerts can include a detailed recommended-contract block with contract symbol, side, strike, expiration, DTE, bid/ask/mid, spread percentage, volume/OI, recommendation score, delta, theta, IV, and an estimated delta-only contract move if the underlying reaches target.
+
+---
+
+### 📊 Telegram Predicted Move Alerts
+
+Alert formatting now includes a compact predicted-price-move line that translates entry, stop, target, and direction into the expected underlying move and stop risk. When an option contract is attached, the alert also estimates the contract premium move using the contract mid price and delta.
+
+---
+
 ### 🧾 Telegram Delivery Hardening
 
 Telegram alerts are now sent through a safe HTML formatting path instead of relying on fragile Markdown parsing. Dynamic alert text is HTML-escaped first, simple bold labels are preserved, and the bot automatically retries with plain text if Telegram rejects a formatted payload. This prevents tickers, setup keys, URLs, underscores, ampersands, and model-generated notes from breaking alert delivery.
@@ -558,13 +617,13 @@ Market Regime Detection
       ↓
 Multi-Timeframe + Setup Quality Filters
       ↓
-AI Reasoning + ML Scoring
+AI Reasoning + ML Scoring + Chart Vision
       ↓
 Price Projection
       ↓
 Probability + Historical Calibration
       ↓
-Risk / Execution / Options Review
+Risk / Execution / Liquid Options Review
       ↓
 Telegram Alerts
       ↓
@@ -596,7 +655,7 @@ Multi-Timeframe Confirmation
         ↓
 Execution + Setup Quality Filters
         ↓
-AI Reasoning Engine
+AI Reasoning Engine + AI Vision Chart Reader
         ↓
 ML Scoring Layers
         ↓
@@ -604,7 +663,7 @@ Price Projection Engine
         ↓
 Sklearn Probability Model
         ↓
-Trade Ranking Engine
+Trade Ranking Engine + Options Contract Selector
         ↓
 Telegram + Dashboard
         ↓
@@ -628,6 +687,8 @@ The Streamlit dashboard tracks:
 - Historical forecast accuracy fields when available
 - Swing benchmark decisions and rejection context through logs
 - Options-flow bias, score, and gamma-squeeze fields when available
+- Recommended contract, predicted move, and estimated premium-move context when logged
+- AI vision chart-structure context when attached to a scan
 
 ---
 
@@ -714,10 +775,14 @@ MASSIVE_API_KEY=
 OPTIONS_API_BASE_URL=https://api.polygon.io
 OPTIONS_FLOW_EXPIRY_DAYS=45
 OPTIONS_FLOW_TOP_CONTRACTS=24
+OPTIONS_FLOW_TRADE_LIMIT=50
 OPTIONS_SWEEP_NOTIONAL_THRESHOLD=250000
 OPTIONS_BLOCK_NOTIONAL_THRESHOLD=500000
 OPTIONS_PUT_WALL_OI_THRESHOLD=5000
 OPTIONS_CALL_WALL_OI_THRESHOLD=5000
+OPTIONS_OI_BUILD_VOLUME_OI_RATIO=0.35
+OPTIONS_IV_EXPANSION_RATIO=1.15
+OPTIONS_DELTA_IMBALANCE_RATIO=1.75
 OPTIONS_GAMMA_SQUEEZE_MIN_SCORE=70
 
 # Optional contract-selection tuning
@@ -779,7 +844,8 @@ MAX_OPTION_DTE=45
 - Swing analysis can run after hours and can fall back to daily-only context.
 - Auto watchlist discovery requires Polygon snapshot access.
 - Options-flow scoring depends on provider snapshot fields and should be treated as a proxy, not a complete tape feed.
-- Price projections are probabilistic estimates, not guarantees.
+- Price projections and estimated option premium moves are probabilistic estimates, not guarantees.
+- AI vision requires TradingView pages to load successfully in the local browser environment.
 - Not financial advice.
 
 ---
@@ -787,40 +853,3 @@ MAX_OPTION_DTE=45
 # 👨‍💻 Author
 
 Bhanu Yamzala
-
----
-
-### 👁️ AI Vision Chart Reader
-
-StockeAlerts can now capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read.
-
-The vision reader evaluates visual price action that numeric indicators often miss:
-
-- Failed breakouts and late chase risk
-- Volatility compression before expansion
-- Wedges and tightening structure
-- Exhaustion candles and rejection wicks
-- Trapped longs / trapped shorts
-- Liquidity grabs above resistance or below support
-- Overall trend quality: strong, healthy, mixed, choppy, or exhausted
-
-Use `chart_ai.analyze_chart_vision(symbol, analysis=tech, timeframe="D")` to screenshot the chart and return normalized JSON with `decision`, `direction`, `confidence`, `pattern`, key levels, feature flags, warnings, and summary. The normalized visual reading can be attached to a technical context as `tech["vision_chart"]`; `vision_ai.score_chart_structure()` will merge it into the existing chart-structure score so swing and reasoning gates can account for visual failed breakouts, compression, liquidity grabs, trapped traders, exhaustion, and trend quality.
-
-Required setup:
-
-| Setting | Meaning |
-|---|---|
-| `OPENAI_API_KEY` | Enables OpenAI-powered alert reasoning and Vision analysis |
-| `OPENAI_REASONING_MODEL` | Optional market-data reasoning model override, defaults to `gpt-5.5` |
-| `OPENAI_REASONING_EFFORT` | Optional reasoning-depth override for GPT-5/o-series models, defaults to `medium` |
-| `OPENAI_VISION_MODEL` | Optional chart Vision model override, defaults to `OPENAI_REASONING_MODEL` (`gpt-5.5` by default) |
-| Playwright Chromium | Required for TradingView screenshot capture (`playwright install chromium`) |
-
-Example:
-
-```python
-from chart_ai import analyze_chart_vision
-
-vision = await analyze_chart_vision("NASDAQ:NVDA", analysis=tech, timeframe="D")
-tech["vision_chart"] = vision
-```

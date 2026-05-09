@@ -8,6 +8,46 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧾 Telegram Delivery Hardening
+
+Telegram alerts are now sent through a safe HTML formatting path instead of relying on fragile Markdown parsing. Dynamic alert text is HTML-escaped first, simple bold labels are preserved, and the bot automatically retries with plain text if Telegram rejects a formatted payload. This prevents tickers, setup keys, URLs, underscores, ampersands, and model-generated notes from breaking alert delivery.
+
+---
+
+### 📌 Auto Watchlist + Daily Mover Discovery
+
+The scanner can now merge the static watchlist with active Polygon daily movers. When `USE_AUTO_WATCHLIST` is enabled, the bot pulls U.S. equity snapshots, filters by minimum price, volume, and absolute daily change, ranks movers by activity, and adds the highest-priority names to the scan universe.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `USE_AUTO_WATCHLIST` | Enable/disable automatic mover discovery |
+| `AUTO_WATCHLIST_LIMIT` | Maximum number of mover symbols to append |
+| `MIN_AUTO_VOLUME` | Minimum same-day volume for auto-added names |
+| `MIN_AUTO_CHANGE_PCT` | Minimum absolute percentage move |
+| `MIN_STOCK_PRICE` | Low-price filter for mover candidates |
+
+The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers.
+
+---
+
+### 🌙 Daily-Only Swing Context Fallback
+
+Swing scanning no longer depends on having intraday minute bars. If minute data is missing, unavailable premarket, or outside the regular session, the bot builds a daily technical context from historical daily bars and can still score swing setups using daily closes, 20/50/200-day moving averages, ATR, relative volume, recent highs/lows, daily trend, weekly trend, and 60-day price history.
+
+This makes after-hours, weekend, and sparse-intraday swing scans more reliable.
+
+---
+
+### 🏆 Swing Benchmark Gate
+
+Swing candidates now pass through a benchmark gate after the AI reasoning report is generated. The benchmark accepts only high-quality A+/A setups with aligned trend/regime context, acceptable execution quality, strong enough multi-timeframe and chart structure, and no AI reject risks. Rejected candidates log explicit reasons such as score, regime, execution, MTF, or chart-structure misses.
+
+Outcome tracking now uses the full swing hold window: a displayed range like `2-10 days` is converted to the maximum horizon so the trade has the complete advertised period to reach its stop or target.
+
+---
+
 ### 🎯 2-Day Price Projection Engine
 
 StockeAlerts now includes a dedicated short-term projection layer that estimates the next 2-day directional bias and expected price range.
@@ -147,6 +187,17 @@ The options layer evaluates:
 - Implied volatility
 - Volume and open interest
 
+The true options flow and liquidity engine can also use Polygon/Massive-compatible options APIs to score explosive intraday and swing conditions:
+
+- Aggressive call / put sweeps and large block-print proxies
+- Put and call OI walls
+- Fresh OI-build pressure via volume/open-interest ratios
+- Dealer gamma state and gamma-squeeze conditions
+- IV expansion proxies
+- Delta imbalance and call/put premium imbalance
+
+Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, and `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`.
+
 Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
 
 ---
@@ -280,7 +331,31 @@ Win Probability: 0.74
 
 # 📈 Professional Swing Trading Engine
 
-The swing engine is a multi-factor confluence system for CALL and PUT swing setups.
+The swing engine is a multi-factor confluence system for CALL and PUT swing setups. It supports both full intraday context and a daily-only fallback path for swing scans when minute bars are not available.
+
+## Daily-Only Swing Inputs
+
+When intraday data is unavailable, the scanner can still evaluate swing setups from daily bars using:
+
+- Daily closes and the latest 60 closes
+- 20 DMA, 50 DMA, and 200 DMA
+- ATR14 for stop/target distance
+- Previous-day high/low and recent 20-day high/low
+- Current volume, 20-day average volume, and relative volume
+- Daily and weekly trend state
+
+## Swing Quality Benchmark
+
+Before a swing alert is sent, the benchmark layer validates:
+
+- A+/A reasoning decision or strong final score
+- Directional market-regime alignment
+- GOOD/WARNING execution quality
+- PASS/WARNING setup quality
+- GOOD/ELITE chart-structure quality
+- GOOD/STRONG multi-timeframe alignment
+- No AI reject reasons
+
 
 ## Advanced Swing Confirmation
 
@@ -358,6 +433,10 @@ This helps reduce fake breakouts, countertrend trades, and low-quality swing ent
 ---
 
 # 📊 Alert Examples
+
+## Telegram Formatting Reliability
+
+Alert messages are HTML-safe by default. The bot escapes dynamic text, preserves simple bold labels, and falls back to plain text when Telegram rejects formatted content. This is designed to keep alerts deliverable even when tickers, setup keys, URLs, or AI explanations contain characters that would otherwise break Markdown parsing.
 
 ## Intraday Alert Contents
 
@@ -464,9 +543,9 @@ Automatically calculates:
 # 📊 Full Trading Lifecycle
 
 ```text
-Watchlist Scan
+Static Watchlist + Auto Daily Movers
       ↓
-Technical Analysis
+Technical Analysis / Daily Swing Context
       ↓
 Intraday Engine + Swing Engine
       ↓
@@ -496,9 +575,9 @@ Adaptive Learning + Daily Report
 # 🏗️ System Architecture
 
 ```text
-Market Data APIs
+Market Data APIs + Polygon Daily Movers
         ↓
-Technical Analysis Engine
+Technical Analysis Engine / Daily Swing Context
         ↓
 Fib + Confluence Engine
         ↓
@@ -542,6 +621,8 @@ The Streamlit dashboard tracks:
 - Swing vs intraday performance
 - Setup quality distribution
 - Historical forecast accuracy fields when available
+- Swing benchmark decisions and rejection context through logs
+- Options-flow bias, score, and gamma-squeeze fields when available
 
 ---
 
@@ -557,6 +638,7 @@ Features:
 - Swing trade analysis
 - Projection-vs-actual comparison
 - Daily learning reports
+- Neutral performance-learning baselines when history is missing or incomplete
 
 ---
 
@@ -564,8 +646,8 @@ Features:
 
 ```bash
 pip install -r requirements.txt
+# Optional: install scikit-learn if you want the logistic regression probability model
 pip install scikit-learn
-pip install streamlit
 ```
 
 Optional browser setup for chart capture:
@@ -610,6 +692,28 @@ TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
+
+# Optional options-flow providers and tuning
+OPTIONS_API_KEY=
+MASSIVE_API_KEY=
+OPTIONS_API_BASE_URL=https://api.polygon.io
+OPTIONS_FLOW_EXPIRY_DAYS=45
+OPTIONS_FLOW_TOP_CONTRACTS=24
+OPTIONS_SWEEP_NOTIONAL_THRESHOLD=250000
+OPTIONS_BLOCK_NOTIONAL_THRESHOLD=500000
+OPTIONS_PUT_WALL_OI_THRESHOLD=5000
+OPTIONS_CALL_WALL_OI_THRESHOLD=5000
+OPTIONS_GAMMA_SQUEEZE_MIN_SCORE=70
+
+# Optional contract-selection tuning
+MIN_OPTION_VOLUME=100
+MIN_OPTION_OI=250
+MAX_OPTION_SPREAD_PCT=12
+MAX_OPTION_IV=1.20
+TARGET_MIN_DELTA=0.35
+TARGET_MAX_DELTA=0.65
+MIN_OPTION_DTE=7
+MAX_OPTION_DTE=21
 ```
 
 ---
@@ -618,7 +722,7 @@ ALPACA_SECRET_KEY=
 
 ## 📈 Portfolio & Position Management
 
-- Open position tracking
+- Expanded open-position tracking
 - Portfolio exposure management
 - Risk balancing
 - Sector concentration limits
@@ -632,7 +736,7 @@ ALPACA_SECRET_KEY=
 
 ## 🤖 Auto Trading (Alpaca)
 
-- Automated execution
+- Expanded automated execution controls
 - Smart order routing
 - Dynamic position sizing
 - Stop/target automation
@@ -657,7 +761,9 @@ ALPACA_SECRET_KEY=
 
 - Requires historical logs for ML improvement.
 - Works best during active market sessions.
-- Swing analysis can run after hours.
+- Swing analysis can run after hours and can fall back to daily-only context.
+- Auto watchlist discovery requires Polygon snapshot access.
+- Options-flow scoring depends on provider snapshot fields and should be treated as a proxy, not a complete tape feed.
 - Price projections are probabilistic estimates, not guarantees.
 - Not financial advice.
 
@@ -666,3 +772,38 @@ ALPACA_SECRET_KEY=
 # 👨‍💻 Author
 
 Bhanu Yamzala
+
+---
+
+### 👁️ AI Vision Chart Reader
+
+StockeAlerts can now capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read.
+
+The vision reader evaluates visual price action that numeric indicators often miss:
+
+- Failed breakouts and late chase risk
+- Volatility compression before expansion
+- Wedges and tightening structure
+- Exhaustion candles and rejection wicks
+- Trapped longs / trapped shorts
+- Liquidity grabs above resistance or below support
+- Overall trend quality: strong, healthy, mixed, choppy, or exhausted
+
+Use `chart_ai.analyze_chart_vision(symbol, analysis=tech, timeframe="D")` to screenshot the chart and return normalized JSON with `decision`, `direction`, `confidence`, `pattern`, key levels, feature flags, warnings, and summary. The normalized visual reading can be attached to a technical context as `tech["vision_chart"]`; `vision_ai.score_chart_structure()` will merge it into the existing chart-structure score so swing and reasoning gates can account for visual failed breakouts, compression, liquidity grabs, trapped traders, exhaustion, and trend quality.
+
+Required setup:
+
+| Setting | Meaning |
+|---|---|
+| `OPENAI_API_KEY` | Enables OpenAI Vision analysis |
+| `OPENAI_VISION_MODEL` | Optional model override, defaults to `gpt-4o-mini` |
+| Playwright Chromium | Required for TradingView screenshot capture (`playwright install chromium`) |
+
+Example:
+
+```python
+from chart_ai import analyze_chart_vision
+
+vision = await analyze_chart_vision("NASDAQ:NVDA", analysis=tech, timeframe="D")
+tech["vision_chart"] = vision
+```

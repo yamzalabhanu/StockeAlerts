@@ -88,7 +88,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
 
-    def test_swing_benchmark_accepts_only_exact_elite_criteria(self):
+    def test_swing_benchmark_accepts_elite_directional_criteria(self):
         for direction in ("CALL", "PUT"):
             setup = self._setup()
             setup["direction"] = direction
@@ -104,23 +104,34 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
 
+    def test_swing_benchmark_accepts_high_quality_a_setup(self):
+        setup = self._setup()
+        setup["risk_reward"] = 1.8
+        reasoning = self._reasoning()
+        reasoning["decision"] = "A"
+        reasoning["final_score"] = 88
+        reasoning["mtf"]["structure"] = "GOOD_ALIGNMENT"
+        reasoning["vision"]["quality"] = "GOOD"
+
+        self.assertTrue(meets_swing_benchmark(setup, reasoning))
+
     def test_swing_benchmark_reject_reasons_explain_missing_criteria(self):
         reasoning = self._reasoning()
-        reasoning["final_score"] = 87
+        reasoning["final_score"] = 86
         reasoning["execution"]["quality"] = "BAD"
 
         reasons = swing_benchmark_reject_reasons(self._setup(), reasoning)
 
-        self.assertTrue(any("score 87" in reason for reason in reasons))
+        self.assertTrue(any("score 86" in reason for reason in reasons))
         self.assertTrue(any("execution BAD" in reason for reason in reasons))
 
     def test_swing_benchmark_rejects_near_miss_criteria(self):
         near_misses = (
-            ("final_score", 89),
+            ("final_score", 87),
             ("regime.regime", "TRENDING_BEAR"),
-            ("mtf.structure", "GOOD_ALIGNMENT"),
+            ("mtf.structure", "MIXED_ALIGNMENT"),
             ("execution.quality", "BAD"),
-            ("vision.quality", "GOOD"),
+            ("vision.quality", "NEUTRAL"),
         )
 
         for path, value in near_misses:

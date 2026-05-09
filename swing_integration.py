@@ -23,13 +23,13 @@ SWING_ALERT_CACHE = {}
 
 
 SWING_MIN_BENCHMARK_RR = 1.8
-SWING_ALLOWED_DECISIONS = {"A+", "A"}
-SWING_MIN_COMPOSITE_SCORE = 88
+SWING_ALLOWED_DECISIONS = {"A+"}
+SWING_MIN_COMPOSITE_SCORE = 95
 SWING_DIRECTION_REGIMES = {"CALL": "TRENDING_BULL", "PUT": "TRENDING_BEAR"}
 SWING_ALLOWED_EXECUTION = {EXECUTION_GOOD, EXECUTION_WARNING}
-SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING}
-SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
-SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
+SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECTED}
+SWING_ALLOWED_CHART_STRUCTURES = {"ELITE"}
+SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT"}
 
 
 def swing_benchmark_reject_reasons(setup, reasoning):
@@ -191,6 +191,7 @@ def process_swing_candidate(bot, ticker, tech):
 
     if not isinstance(setup, dict):
         print(f"{ticker}: invalid swing setup object")
+
         return None
 
     try:
@@ -238,6 +239,7 @@ def process_swing_candidate(bot, ticker, tech):
 
         setup["score"] = adjusted
         setup["ml_probability"] = prob
+
         setup["ml_model_info"] = model_info
 
     except Exception as e:

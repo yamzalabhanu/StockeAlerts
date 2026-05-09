@@ -640,6 +640,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
     async def run(self):
         print("🚀 Stock Technical AI Bot Running")
+
         while True:
             try:
                 if not self.is_regular_market_hours() or not self.is_quality_trading_window():
@@ -677,3 +678,4 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             except Exception as e:
                 print(f"Scan loop error: {e}")
                 await asyncio.sleep(SCAN_INTERVAL_SEC)
+

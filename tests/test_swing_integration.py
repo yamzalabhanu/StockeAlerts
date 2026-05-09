@@ -110,9 +110,16 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             {"signal": "CALL", "price": 100},
         )
 
-    def test_swing_benchmark_rejects_ai_reject_risks(self):
+    def test_swing_benchmark_allows_elite_quality_filter_ai_reject_risk(self):
         reasoning = self._reasoning()
         reasoning["reject_reasons"] = ["Setup failed elite quality filters"]
+        reasoning["setup_quality"]["status"] = "REJECT"
+
+        self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
+
+    def test_swing_benchmark_still_rejects_blocking_ai_reject_risks(self):
+        reasoning = self._reasoning()
+        reasoning["reject_reasons"] = ["Poor liquidity/execution quality"]
 
         self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
 

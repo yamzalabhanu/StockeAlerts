@@ -14,7 +14,7 @@ from config import (
 from swing_scanner import score_swing_setup, format_swing_alert
 from ai_reasoning_engine import build_reasoning_report
 from execution_quality import GOOD as EXECUTION_GOOD, WARNING as EXECUTION_WARNING
-from setup_filters import PASS, WARNING
+from setup_filters import PASS, REJECT, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from options_engine import analyze_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
@@ -23,13 +23,26 @@ SWING_ALERT_CACHE = {}
 
 
 SWING_MIN_BENCHMARK_RR = 1.8
-SWING_ALLOWED_DECISIONS = {"A+"}
-SWING_MIN_COMPOSITE_SCORE = 95
+SWING_ALLOWED_DECISIONS = {"A+", "A"}
+SWING_MIN_COMPOSITE_SCORE = 88
 SWING_DIRECTION_REGIMES = {"CALL": "TRENDING_BULL", "PUT": "TRENDING_BEAR"}
 SWING_ALLOWED_EXECUTION = {EXECUTION_GOOD, EXECUTION_WARNING}
-SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECTED}
-SWING_ALLOWED_CHART_STRUCTURES = {"ELITE"}
-SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT"}
+SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECT}
+SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
+SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
+
+
+SWING_NON_BLOCKING_AI_REJECT_REASONS = {"Setup failed elite quality filters"}
+
+
+def _blocking_ai_reject_reasons(reasoning):
+    """Return AI reject reasons that should still block benchmark-quality swings."""
+    raw_reasons = reasoning.get("reject_reasons") or []
+    return [
+        str(reason)
+        for reason in raw_reasons
+        if str(reason) not in SWING_NON_BLOCKING_AI_REJECT_REASONS
+    ]
 
 
 def swing_benchmark_reject_reasons(setup, reasoning):
@@ -55,9 +68,9 @@ def swing_benchmark_reject_reasons(setup, reasoning):
     if risk_reward < SWING_MIN_BENCHMARK_RR:
         reasons.append(f"risk/reward {risk_reward:g}R is below {SWING_MIN_BENCHMARK_RR:g}R")
 
-    ai_reject_reasons = reasoning.get("reject_reasons") or []
+    ai_reject_reasons = _blocking_ai_reject_reasons(reasoning)
     if ai_reject_reasons:
-        reasons.append("AI reject risks: " + "; ".join(map(str, ai_reject_reasons)))
+        reasons.append("AI reject risks: " + "; ".join(ai_reject_reasons))
 
     regime = (reasoning.get("regime") or {}).get("regime")
     required_regime = SWING_DIRECTION_REGIMES.get(direction)

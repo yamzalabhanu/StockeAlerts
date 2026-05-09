@@ -12,6 +12,7 @@ from typing import Dict, Any
 
 from bot_technical import StockTechnicalBase
 from bot_utils import fmt_price, extract_gpt_json, normalize_ai_response
+from alert_formatting import format_predicted_price_move, format_recommended_option_contract
 from openai_models import chat_completion_options
 from outcome_tracker import track_outcome
 from chart_capture import capture_chart
@@ -20,7 +21,7 @@ from ai_scoring import ai_score_setup
 from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
-from options_engine import analyze_options_flow, format_options_flow, format_option_alert, option_to_dict, options_flow_to_dict, select_option_contract
+from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -480,21 +481,28 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             else:
                 options_flow_text = "\n" + format_options_flow(options_flow) + "\n"
 
+        predicted_move_text = format_predicted_price_move(
+            direction,
+            ai.get("entry"),
+            ai.get("target"),
+            ai.get("stop"),
+        )
         option_contract_text = ""
         if option_contract:
             if isinstance(option_contract, dict):
-                if option_contract.get("status") == "OK":
-                    option_contract_text = (
-                        f"\n🎯 *Option Pick:* {option_contract.get('contract_symbol')} | "
-                        f"Score {option_contract.get('recommendation_score')} | "
-                        f"Vol/OI {option_contract.get('volume')}/{option_contract.get('open_interest')} "
-                        f"({option_contract.get('volume_oi_ratio')}) | "
-                        f"Mid {option_contract.get('mid')}\n"
-                    )
-                else:
-                    option_contract_text = f"\n🎯 *Option Pick:* SKIP - {option_contract.get('reason')}\n"
+                option_contract_text = format_recommended_option_contract(
+                    option_contract,
+                    direction=direction,
+                    entry=ai.get("entry"),
+                    target=ai.get("target"),
+                )
             else:
-                option_contract_text = "\n" + format_option_alert(option_contract) + "\n"
+                option_contract_text = format_recommended_option_contract(
+                    option_contract,
+                    direction=direction,
+                    entry=ai.get("entry"),
+                    target=ai.get("target"),
+                )
 
         msg = (
             f"{emoji} *{entry_mode} {direction} SETUP: {ticker}*\n"
@@ -512,6 +520,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🎯 *Entry:* {fmt_price(ai['entry'])}\n"
             f"🛑 *Stop:* {fmt_price(ai['stop'])}\n"
             f"🚀 *Target:* {fmt_price(ai['target'])}\n"
+            f"{predicted_move_text}"
             f"📐 *R/R:* {float(ai['risk_reward'] or 0):.2f}:1\n"
             f"📏 *ATR14:* {fmt_price(tech['atr14'])}\n\n"
             f"📍 *VWAP:* {fmt_price(tech['vwap'])}\n"

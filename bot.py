@@ -12,6 +12,7 @@ from typing import Dict, Any
 
 from bot_technical import StockTechnicalBase
 from bot_utils import fmt_price, extract_gpt_json, normalize_ai_response
+from openai_models import chat_completion_options
 from outcome_tracker import track_outcome
 from chart_capture import capture_chart
 from intraday_confirm import intraday_confirmation
@@ -230,8 +231,7 @@ Return ONLY valid JSON:
 
         try:
             r = ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,
+                **chat_completion_options(temperature=0.1),
                 messages=[
                     {
                         "role": "system",
@@ -271,8 +271,7 @@ Intraday Confirmation: {intraday_info}
 Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_reward, setup_quality, entry_timing, retest_confirmed, late_breakout_risk, reason.
 """
             response = ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                temperature=0.1,
+                **chat_completion_options(temperature=0.1),
                 messages=[
                     {"role": "system", "content": "Use the chart to confirm structure. Reject chop, fakeouts, and late extensions."},
                     {

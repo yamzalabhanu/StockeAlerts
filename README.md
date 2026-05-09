@@ -674,6 +674,13 @@ streamlit run streamlit_dashboard.py
 
 ---
 
+
+## 🧠 OpenAI Market Reasoning Model
+
+StockeAlerts defaults its AI alert gates to `gpt-5.5` with `medium` reasoning effort so the model can think through trend, volume, regime, risk/reward, entry timing, and options context before approving alerts. Override `OPENAI_REASONING_MODEL` if you need a cheaper or lower-latency model, and adjust `OPENAI_REASONING_EFFORT` (`low`, `medium`, `high`, etc.) to trade speed/cost for deeper reasoning.
+
+---
+
 # 🔁 Train / Refresh Learning Models
 
 ```bash
@@ -687,6 +694,9 @@ python daily_report_engine.py
 
 ```text
 OPENAI_API_KEY=
+OPENAI_REASONING_MODEL=gpt-5.5
+OPENAI_REASONING_EFFORT=medium
+OPENAI_VISION_MODEL=gpt-5.5
 POLYGON_API_KEY=
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -795,8 +805,10 @@ Required setup:
 
 | Setting | Meaning |
 |---|---|
-| `OPENAI_API_KEY` | Enables OpenAI Vision analysis |
-| `OPENAI_VISION_MODEL` | Optional model override, defaults to `gpt-4o-mini` |
+| `OPENAI_API_KEY` | Enables OpenAI-powered alert reasoning and Vision analysis |
+| `OPENAI_REASONING_MODEL` | Optional market-data reasoning model override, defaults to `gpt-5.5` |
+| `OPENAI_REASONING_EFFORT` | Optional reasoning-depth override for GPT-5/o-series models, defaults to `medium` |
+| `OPENAI_VISION_MODEL` | Optional chart Vision model override, defaults to `OPENAI_REASONING_MODEL` (`gpt-5.5` by default) |
 | Playwright Chromium | Required for TradingView screenshot capture (`playwright install chromium`) |
 
 Example:

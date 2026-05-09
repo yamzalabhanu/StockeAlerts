@@ -1,5 +1,6 @@
 import os
 from openai import OpenAI
+from openai_models import chat_completion_options
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -28,8 +29,9 @@ Reason: one short sentence
 """
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        **chat_completion_options(
+            messages=[{"role": "user", "content": prompt}],
+        ),
     )
 
     return response.choices[0].message.content

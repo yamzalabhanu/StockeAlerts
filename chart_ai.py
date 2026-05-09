@@ -10,13 +10,15 @@ from typing import Any, Dict, Iterable
 from openai import OpenAI
 from playwright.async_api import async_playwright
 
+from config import OPENAI_VISION_MODEL
+
 from bot_utils import safe_float, safe_int
 from symbol_utils import is_valid_symbol, normalize_symbol, tradingview_symbol
 
 CHART_DIR = Path("charts")
 CHART_DIR.mkdir(exist_ok=True)
 
-DEFAULT_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+DEFAULT_VISION_MODEL = OPENAI_VISION_MODEL
 DEFAULT_VIEWPORT = {"width": 1440, "height": 1000}
 VISION_FEATURES = (
     "failed_breakout",

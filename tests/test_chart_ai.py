@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from chart_ai import analyze_chart_vision, normalize_vision_reading, score_vision_reading
+from chart_ai import DEFAULT_VISION_MODEL, analyze_chart_vision, normalize_vision_reading, score_vision_reading
 from vision_ai import score_chart_structure
 
 
@@ -161,7 +161,11 @@ class ChartVisionTests(unittest.TestCase):
 
         kwargs = client.chat.completions.kwargs
         self.assertEqual(reading["decision"], "WAIT")
+        self.assertEqual(kwargs["model"], DEFAULT_VISION_MODEL)
+        self.assertEqual(DEFAULT_VISION_MODEL, "gpt-5.5")
         self.assertEqual(kwargs["response_format"]["type"], "json_schema")
+        self.assertEqual(kwargs["reasoning_effort"], "medium")
+        self.assertNotIn("temperature", kwargs)
         text = kwargs["messages"][0]["content"][0]["text"]
         self.assertIn("failed breakouts", text)
         self.assertIn("liquidity grabs", text)

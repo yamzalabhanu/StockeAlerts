@@ -91,6 +91,19 @@ MIN_AUTO_VOLUME = 2_000_000
 MIN_AUTO_CHANGE_PCT = 2.0
 MIN_STOCK_PRICE = 8
 
+# Extended-hours and options-flow discovery used to build the intraday/swing watchlist.
+# Polygon minute aggregates include pre-market/after-hours bars for entitled plans, and
+# option snapshots provide same-day option volume plus OI (generally updated from the
+# previous trading day's OCC data).
+AUTO_WATCHLIST_USE_EXTENDED_HOURS = os.getenv("AUTO_WATCHLIST_USE_EXTENDED_HOURS", "true").lower() == "true"
+AUTO_WATCHLIST_USE_OPTIONS = os.getenv("AUTO_WATCHLIST_USE_OPTIONS", "true").lower() == "true"
+AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT = int(os.getenv("AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT", "120"))
+AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT = int(os.getenv("AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT", "80"))
+MIN_EXTENDED_HOURS_VOLUME = int(os.getenv("MIN_EXTENDED_HOURS_VOLUME", "500000"))
+MIN_EXTENDED_HOURS_CHANGE_PCT = float(os.getenv("MIN_EXTENDED_HOURS_CHANGE_PCT", "2.0"))
+MIN_AUTO_OPTION_VOLUME = int(os.getenv("MIN_AUTO_OPTION_VOLUME", "1000"))
+MIN_AUTO_OPTION_OPEN_INTEREST = int(os.getenv("MIN_AUTO_OPTION_OPEN_INTEREST", "5000"))
+
 # Symbols from the auto mover list are allowed, but alerts still must pass the same scoring,
 # intraday confirmation, AI gate, liquidity, and cooldown filters.
 AUTO_WATCHLIST_SCAN_REASON = "daily_mover"

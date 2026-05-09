@@ -4,10 +4,9 @@ from polygon import RESTClient
 import datetime as dt
 import time
 import requests
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from bot_utils import safe_float, pct_diff
-
 
 client = RESTClient(POLYGON_API_KEY)
 
@@ -22,7 +21,9 @@ class StockTechnicalBase:
         self.market_bias_cache = None
         self.market_bias_cache_time = 0
 
-    def _parse_watchlist_day(self, day: Optional[Union[str, dt.date, dt.datetime]] = None) -> Optional[dt.date]:
+    def _parse_watchlist_day(
+        self, day: Optional[Union[str, dt.date, dt.datetime]] = None
+    ) -> Optional[dt.date]:
         if day is None:
             configured_day = globals().get("AUTO_WATCHLIST_DATE", "")
             day = configured_day or None
@@ -42,7 +43,9 @@ class StockTechnicalBase:
                 return None
             return dt.date.fromisoformat(raw)
 
-        raise TypeError("watchlist day must be a YYYY-MM-DD string, date, datetime, or None")
+        raise TypeError(
+            "watchlist day must be a YYYY-MM-DD string, date, datetime, or None"
+        )
 
     def _merge_auto_watchlist(self, auto: List[str], label: str) -> List[str]:
         final = list(dict.fromkeys(self.base_tickers + auto))
@@ -62,6 +65,224 @@ class StockTechnicalBase:
         r = requests.get(url, params=params, timeout=20)
         r.raise_for_status()
         return r.json()
+
+    def _previous_trading_day(self, day: dt.date) -> dt.date:
+        previous = day - dt.timedelta(days=1)
+        while previous.weekday() >= 5:
+            previous -= dt.timedelta(days=1)
+        return previous
+
+    def _get_grouped_daily_aggs(self, day: dt.date) -> list:
+        url = (
+            "https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/"
+            f"{day.isoformat()}"
+        )
+        data = self._request_polygon_json(url, params={"adjusted": "true"})
+        return data.get("results", []) or []
+
+    def _get_previous_closes(self, day: dt.date) -> Dict[str, float]:
+        try:
+            previous_day = self._previous_trading_day(day)
+            return {
+                item.get("T"): safe_float(item.get("c"))
+                for item in self._get_grouped_daily_aggs(previous_day)
+                if item.get("T") and safe_float(item.get("c")) > 0
+            }
+        except Exception as e:
+            print(f"Previous close lookup skipped for {day}: {e}")
+            return {}
+
+    def _empty_extended_metrics(self) -> Dict[str, Any]:
+        return {
+            "premarket_volume": 0.0,
+            "premarket_change_pct": 0.0,
+            "afterhours_volume": 0.0,
+            "afterhours_change_pct": 0.0,
+            "extended_volume": 0.0,
+            "extended_change_pct": 0.0,
+        }
+
+    def _get_extended_hours_metrics(
+        self, ticker: str, day: dt.date, prev_close: float = 0.0
+    ) -> Dict[str, Any]:
+        """Return Polygon pre-market/after-hours volume and move for one ticker/day."""
+        if not AUTO_WATCHLIST_USE_EXTENDED_HOURS:
+            return self._empty_extended_metrics()
+
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/"
+            f"{day.isoformat()}/{day.isoformat()}"
+        )
+        data = self._request_polygon_json(
+            url,
+            params={"adjusted": "true", "sort": "asc", "limit": 50000},
+        )
+
+        sessions = {
+            "premarket": {"volume": 0.0, "close": None},
+            "afterhours": {"volume": 0.0, "close": None},
+        }
+
+        for bar in data.get("results", []) or []:
+            timestamp = safe_float(bar.get("t"))
+            if timestamp <= 0:
+                continue
+
+            bar_time = (
+                dt.datetime.fromtimestamp(timestamp / 1000, dt.timezone.utc)
+                .astimezone(MARKET_TZ)
+                .time()
+            )
+            session = None
+            if dt.time(4, 0) <= bar_time < dt.time(9, 30):
+                session = "premarket"
+            elif dt.time(16, 0) <= bar_time <= dt.time(20, 0):
+                session = "afterhours"
+
+            if not session:
+                continue
+
+            sessions[session]["volume"] += safe_float(bar.get("v"))
+            sessions[session]["close"] = safe_float(bar.get("c"))
+
+        metrics = self._empty_extended_metrics()
+        for session in ("premarket", "afterhours"):
+            volume = sessions[session]["volume"]
+            close_price = safe_float(sessions[session]["close"])
+            change_pct = (
+                abs(pct_diff(close_price, prev_close) or 0) if prev_close else 0.0
+            )
+            metrics[f"{session}_volume"] = volume
+            metrics[f"{session}_change_pct"] = change_pct
+
+        metrics["extended_volume"] = max(
+            metrics["premarket_volume"], metrics["afterhours_volume"]
+        )
+        metrics["extended_change_pct"] = max(
+            metrics["premarket_change_pct"], metrics["afterhours_change_pct"]
+        )
+        return metrics
+
+    def _get_options_activity_metrics(self, ticker: str) -> Dict[str, Any]:
+        """Summarize Polygon option snapshot volume/OI for watchlist ranking."""
+        metrics = {"option_volume": 0, "option_open_interest": 0, "option_contracts": 0}
+        if not AUTO_WATCHLIST_USE_OPTIONS:
+            return metrics
+
+        for contract_type in ("call", "put"):
+            url = f"https://api.polygon.io/v3/snapshot/options/{ticker}"
+            try:
+                data = self._request_polygon_json(
+                    url, params={"contract_type": contract_type, "limit": 250}
+                )
+            except Exception as e:
+                print(
+                    f"{contract_type.title()} option metrics skipped for {ticker}: {e}"
+                )
+                continue
+
+            for item in data.get("results", []) or []:
+                day = item.get("day", {}) or {}
+                details = item.get("details", {}) or {}
+                volume = safe_float(
+                    day.get("volume")
+                    or day.get("v")
+                    or item.get("volume")
+                    or item.get("day_volume")
+                    or item.get("total_volume")
+                )
+                open_interest = safe_float(
+                    item.get("open_interest")
+                    or item.get("openInterest")
+                    or item.get("oi")
+                    or details.get("open_interest")
+                    or details.get("openInterest")
+                    or details.get("oi")
+                )
+                metrics["option_volume"] += int(volume)
+                metrics["option_open_interest"] += int(open_interest)
+                metrics["option_contracts"] += 1
+
+        return metrics
+
+    def _rank_watchlist_candidates(
+        self, candidates: List[Dict[str, Any]], label: str
+    ) -> List[str]:
+        for index, candidate in enumerate(candidates):
+            ticker = candidate["ticker"]
+
+            if index < AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT:
+                try:
+                    candidate.update(
+                        self._get_extended_hours_metrics(
+                            ticker,
+                            candidate["day"],
+                            candidate.get("prev_close", 0.0),
+                        )
+                    )
+                except Exception as e:
+                    print(f"Extended-hours watchlist metrics skipped for {ticker}: {e}")
+
+            if index < AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT:
+                try:
+                    candidate.update(self._get_options_activity_metrics(ticker))
+                except Exception as e:
+                    print(f"Options watchlist metrics skipped for {ticker}: {e}")
+
+            daily_score = max(
+                safe_float(candidate.get("daily_change_pct"))
+                / max(MIN_AUTO_CHANGE_PCT, 0.01),
+                safe_float(candidate.get("daily_volume")) / max(MIN_AUTO_VOLUME, 1),
+            )
+            extended_score = max(
+                safe_float(candidate.get("extended_change_pct"))
+                / max(MIN_EXTENDED_HOURS_CHANGE_PCT, 0.01),
+                safe_float(candidate.get("extended_volume"))
+                / max(MIN_EXTENDED_HOURS_VOLUME, 1),
+            )
+            option_score = max(
+                safe_float(candidate.get("option_volume"))
+                / max(MIN_AUTO_OPTION_VOLUME, 1),
+                safe_float(candidate.get("option_open_interest"))
+                / max(MIN_AUTO_OPTION_OPEN_INTEREST, 1),
+            )
+
+            candidate["watchlist_score"] = (
+                daily_score + (extended_score * 1.25) + (option_score * 1.5)
+            )
+            candidate["qualified"] = (
+                (
+                    safe_float(candidate.get("daily_volume")) >= MIN_AUTO_VOLUME
+                    and safe_float(candidate.get("daily_change_pct"))
+                    >= MIN_AUTO_CHANGE_PCT
+                )
+                or (
+                    safe_float(candidate.get("extended_volume"))
+                    >= MIN_EXTENDED_HOURS_VOLUME
+                    and safe_float(candidate.get("extended_change_pct"))
+                    >= MIN_EXTENDED_HOURS_CHANGE_PCT
+                )
+                or (
+                    safe_float(candidate.get("option_volume")) >= MIN_AUTO_OPTION_VOLUME
+                    and safe_float(candidate.get("option_open_interest"))
+                    >= MIN_AUTO_OPTION_OPEN_INTEREST
+                )
+            )
+
+        movers = [candidate for candidate in candidates if candidate.get("qualified")]
+        movers.sort(
+            key=lambda x: (
+                safe_float(x.get("watchlist_score")),
+                safe_float(x.get("extended_volume")),
+                safe_float(x.get("option_volume")),
+                safe_float(x.get("daily_volume")),
+                safe_float(x.get("price")),
+            ),
+            reverse=True,
+        )
+
+        auto = [x["ticker"] for x in movers[:AUTO_WATCHLIST_LIMIT]]
+        return self._merge_auto_watchlist(auto, label)
 
     def get_active_tickers_for_day(self, day: Union[str, dt.date, dt.datetime]) -> set:
         parsed_day = self._parse_watchlist_day(day)
@@ -91,20 +312,19 @@ class StockTechnicalBase:
 
         return tickers
 
-    def get_historical_auto_watchlist(self, day: Union[str, dt.date, dt.datetime]) -> List[str]:
+    def get_historical_auto_watchlist(
+        self, day: Union[str, dt.date, dt.datetime]
+    ) -> List[str]:
         parsed_day = self._parse_watchlist_day(day)
         if parsed_day is None:
             return self.base_tickers
 
         active_tickers = self.get_active_tickers_for_day(parsed_day)
-        url = (
-            "https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/"
-            f"{parsed_day.isoformat()}"
-        )
-        data = self._request_polygon_json(url, params={"adjusted": "true"})
-        movers = []
+        grouped_results = self._get_grouped_daily_aggs(parsed_day)
+        previous_closes = self._get_previous_closes(parsed_day)
+        candidates = []
 
-        for item in data.get("results", []):
+        for item in grouped_results:
             ticker = item.get("T")
             if active_tickers and ticker not in active_tickers:
                 continue
@@ -119,15 +339,31 @@ class StockTechnicalBase:
             if price < MIN_STOCK_PRICE:
                 continue
 
-            if ticker and volume >= MIN_AUTO_VOLUME and change_pct >= MIN_AUTO_CHANGE_PCT:
-                movers.append((ticker, change_pct, volume, price))
+            if ticker:
+                candidates.append(
+                    {
+                        "ticker": ticker,
+                        "day": parsed_day,
+                        "price": price,
+                        "prev_close": previous_closes.get(ticker, open_price),
+                        "daily_volume": volume,
+                        "daily_change_pct": change_pct,
+                    }
+                )
 
-        movers.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
+        candidates.sort(
+            key=lambda x: (
+                safe_float(x.get("daily_change_pct")),
+                safe_float(x.get("daily_volume")),
+                safe_float(x.get("price")),
+            ),
+            reverse=True,
+        )
+        return self._rank_watchlist_candidates(candidates, parsed_day.isoformat())
 
-        auto = [x[0] for x in movers[:AUTO_WATCHLIST_LIMIT]]
-        return self._merge_auto_watchlist(auto, parsed_day.isoformat())
-
-    def get_auto_watchlist(self, day: Optional[Union[str, dt.date, dt.datetime]] = None) -> List[str]:
+    def get_auto_watchlist(
+        self, day: Optional[Union[str, dt.date, dt.datetime]] = None
+    ) -> List[str]:
         parsed_day = self._parse_watchlist_day(day)
         if not USE_AUTO_WATCHLIST:
             return self.base_tickers
@@ -143,12 +379,14 @@ class StockTechnicalBase:
 
         try:
             data = self._request_polygon_json(url)
-            movers = []
+            today = dt.datetime.now(MARKET_TZ).date()
+            candidates = []
 
             for item in data.get("tickers", []):
                 ticker = item.get("ticker")
                 day = item.get("day", {})
                 last_trade = item.get("lastTrade", {})
+                prev_day = item.get("prevDay", {}) or {}
 
                 change_pct = abs(safe_float(item.get("todaysChangePerc")))
                 volume = safe_float(day.get("v"))
@@ -157,13 +395,29 @@ class StockTechnicalBase:
                 if price < MIN_STOCK_PRICE:
                     continue
 
-                if ticker and volume >= MIN_AUTO_VOLUME and change_pct >= MIN_AUTO_CHANGE_PCT:
-                    movers.append((ticker, change_pct, volume, price))
+                if ticker:
+                    candidates.append(
+                        {
+                            "ticker": ticker,
+                            "day": today,
+                            "price": price,
+                            "prev_close": safe_float(prev_day.get("c")),
+                            "daily_volume": volume,
+                            "daily_change_pct": change_pct,
+                        }
+                    )
 
-            movers.sort(key=lambda x: (x[1], x[2], x[3]), reverse=True)
-
-            auto = [x[0] for x in movers[:AUTO_WATCHLIST_LIMIT]]
-            return self._merge_auto_watchlist(auto, "snapshot")
+            candidates.sort(
+                key=lambda x: (
+                    safe_float(x.get("daily_change_pct")),
+                    safe_float(x.get("daily_volume")),
+                    safe_float(x.get("price")),
+                ),
+                reverse=True,
+            )
+            return self._rank_watchlist_candidates(
+                candidates, "snapshot+extended+options"
+            )
 
         except Exception as e:
             print(f"Auto-watchlist error: {e}")
@@ -208,11 +462,7 @@ class StockTechnicalBase:
             low = safe_float(daily_bars[i].low)
             prev_close = safe_float(daily_bars[i - 1].close)
 
-            tr = max(
-                high - low,
-                abs(high - prev_close),
-                abs(low - prev_close)
-            )
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             trs.append(tr)
 
         return sum(trs[-period:]) / period if len(trs) >= period else None
@@ -221,18 +471,20 @@ class StockTechnicalBase:
         grouped = []
 
         for i in range(0, len(bars), group_size):
-            chunk = bars[i:i + group_size]
+            chunk = bars[i : i + group_size]
 
             if len(chunk) < group_size:
                 continue
 
-            grouped.append({
-                "open": safe_float(chunk[0].open),
-                "high": max(safe_float(x.high) for x in chunk),
-                "low": min(safe_float(x.low) for x in chunk),
-                "close": safe_float(chunk[-1].close),
-                "volume": sum(safe_float(x.volume) for x in chunk),
-            })
+            grouped.append(
+                {
+                    "open": safe_float(chunk[0].open),
+                    "high": max(safe_float(x.high) for x in chunk),
+                    "low": min(safe_float(x.low) for x in chunk),
+                    "close": safe_float(chunk[-1].close),
+                    "volume": sum(safe_float(x.volume) for x in chunk),
+                }
+            )
 
         return grouped
 
@@ -272,9 +524,8 @@ class StockTechnicalBase:
         pm_high = tech.get("premarket_high")
         pd_high = tech.get("prev_high")
 
-        return (
-            (pm_high is not None and price > pm_high) or
-            (pd_high is not None and price > pd_high)
+        return (pm_high is not None and price > pm_high) or (
+            pd_high is not None and price > pd_high
         )
 
     def put_below_pm_or_pd_low(self, tech):
@@ -282,9 +533,8 @@ class StockTechnicalBase:
         pm_low = tech.get("premarket_low")
         pd_low = tech.get("prev_low")
 
-        return (
-            (pm_low is not None and price < pm_low) or
-            (pd_low is not None and price < pd_low)
+        return (pm_low is not None and price < pm_low) or (
+            pd_low is not None and price < pd_low
         )
 
     def get_sector_etf(self, ticker):
@@ -304,13 +554,19 @@ class StockTechnicalBase:
         price = tech["price"]
 
         bullish = (
-            tech.get("vwap") and price > tech["vwap"] and
-            tech.get("ema9") and tech.get("ema21") and tech["ema9"] > tech["ema21"]
+            tech.get("vwap")
+            and price > tech["vwap"]
+            and tech.get("ema9")
+            and tech.get("ema21")
+            and tech["ema9"] > tech["ema21"]
         )
 
         bearish = (
-            tech.get("vwap") and price < tech["vwap"] and
-            tech.get("ema9") and tech.get("ema21") and tech["ema9"] < tech["ema21"]
+            tech.get("vwap")
+            and price < tech["vwap"]
+            and tech.get("ema9")
+            and tech.get("ema21")
+            and tech["ema9"] < tech["ema21"]
         )
 
         if direction == "CALL" and bullish:
@@ -320,7 +576,7 @@ class StockTechnicalBase:
             return "CONFIRMED", f"{etf} confirms bearish sector bias"
 
         return "CONFLICT", f"{etf} does not confirm {direction}"
-        
+
     def get_latest_trading_day(self):
         now = dt.datetime.now(MARKET_TZ)
         day = now.date()
@@ -353,7 +609,6 @@ class StockTechnicalBase:
             print(f"{ticker}: aggregate error {timespan}: {e}")
             return []
 
-
     def build_daily_technical_context(self, ticker, daily, day):
         daily_closes = [safe_float(x.close) for x in daily if x.close is not None]
         daily_highs = [safe_float(x.high) for x in daily if x.high is not None]
@@ -373,13 +628,15 @@ class StockTechnicalBase:
         prev_low = safe_float(prev.low) if prev else None
 
         last_20_daily = daily[-20:] if len(daily) >= 20 else daily
-        recent_high = max([safe_float(x.high) for x in last_20_daily]) if last_20_daily else None
-        recent_low = min([safe_float(x.low) for x in last_20_daily]) if last_20_daily else None
+        recent_high = (
+            max([safe_float(x.high) for x in last_20_daily]) if last_20_daily else None
+        )
+        recent_low = (
+            min([safe_float(x.low) for x in last_20_daily]) if last_20_daily else None
+        )
 
         avg_20_volume = (
-            sum(daily_volumes[-20:]) / 20
-            if len(daily_volumes) >= 20
-            else None
+            sum(daily_volumes[-20:]) / 20 if len(daily_volumes) >= 20 else None
         )
         current_volume = daily_volumes[-1] if daily_volumes else None
         rel_volume = (
@@ -512,9 +769,7 @@ class StockTechnicalBase:
 
         for bar in regular:
             typical = (
-                safe_float(bar.high)
-                + safe_float(bar.low)
-                + safe_float(bar.close)
+                safe_float(bar.high) + safe_float(bar.low) + safe_float(bar.close)
             ) / 3
 
             total_pv += typical * safe_float(bar.volume)
@@ -534,8 +789,12 @@ class StockTechnicalBase:
         recent_low = min([safe_float(x.low) for x in last_20]) if last_20 else None
 
         prev_10 = regular[-11:-1] if len(regular) >= 11 else regular[:-1]
-        previous_recent_high = max([safe_float(x.high) for x in prev_10]) if prev_10 else None
-        previous_recent_low = min([safe_float(x.low) for x in prev_10]) if prev_10 else None
+        previous_recent_high = (
+            max([safe_float(x.high) for x in prev_10]) if prev_10 else None
+        )
+        previous_recent_low = (
+            min([safe_float(x.low) for x in prev_10]) if prev_10 else None
+        )
 
         bars_5m = self.aggregate_bars(regular, 5)
         bars_15m = self.aggregate_bars(regular, 15)
@@ -546,31 +805,33 @@ class StockTechnicalBase:
         price = safe_float(regular[-1].close)
 
         tech = dict(daily_tech)
-        tech.update({
-            "price": price,
-            "vwap": vwap,
-            "ema9": ema9,
-            "ema21": ema21,
-            "ema50": ema50,
-            "trend_5m": trend_5m,
-            "trend_15m": trend_15m,
-            "orb_high": orb_high,
-            "orb_low": orb_low,
-            "premarket_high": pm_high,
-            "premarket_low": pm_low,
-            "recent_high": recent_high,
-            "recent_low": recent_low,
-            "previous_recent_high": previous_recent_high,
-            "previous_recent_low": previous_recent_low,
-            "current_volume": current_volume,
-            "avg_20_volume": avg_20_volume,
-            "intraday_current_volume": current_volume,
-            "intraday_avg_20_volume": avg_20_volume,
-            "last_5_intraday_closes": [safe_float(x.close) for x in regular[-5:]],
-            "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
-            "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],
-            "intraday_available": True,
-        })
+        tech.update(
+            {
+                "price": price,
+                "vwap": vwap,
+                "ema9": ema9,
+                "ema21": ema21,
+                "ema50": ema50,
+                "trend_5m": trend_5m,
+                "trend_15m": trend_15m,
+                "orb_high": orb_high,
+                "orb_low": orb_low,
+                "premarket_high": pm_high,
+                "premarket_low": pm_low,
+                "recent_high": recent_high,
+                "recent_low": recent_low,
+                "previous_recent_high": previous_recent_high,
+                "previous_recent_low": previous_recent_low,
+                "current_volume": current_volume,
+                "avg_20_volume": avg_20_volume,
+                "intraday_current_volume": current_volume,
+                "intraday_avg_20_volume": avg_20_volume,
+                "last_5_intraday_closes": [safe_float(x.close) for x in regular[-5:]],
+                "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
+                "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],
+                "intraday_available": True,
+            }
+        )
 
         self.tech_cache[ticker] = tech
         self.tech_cache_time[ticker] = now_ts
@@ -606,7 +867,7 @@ class StockTechnicalBase:
         below_pd = pd_low is not None and price < pd_low
 
         return below_pm or below_pd
-        
+
     def detect_call_retest(self, tech):
         price = tech["price"]
         lows = tech.get("last_5_lows", [])
@@ -623,7 +884,9 @@ class StockTechnicalBase:
             if level is None:
                 continue
 
-            touched = any(self.is_near_level(low, level, RETEST_TOLERANCE_PCT) for low in lows)
+            touched = any(
+                self.is_near_level(low, level, RETEST_TOLERANCE_PCT) for low in lows
+            )
             reclaimed = price > level
 
             if touched and reclaimed:
@@ -647,7 +910,9 @@ class StockTechnicalBase:
             if level is None:
                 continue
 
-            touched = any(self.is_near_level(high, level, RETEST_TOLERANCE_PCT) for high in highs)
+            touched = any(
+                self.is_near_level(high, level, RETEST_TOLERANCE_PCT) for high in highs
+            )
             rejected = price < level
 
             if touched and rejected:
@@ -670,19 +935,33 @@ class StockTechnicalBase:
         vwap_ext = abs(pct_diff(price, tech.get("vwap"))) if tech.get("vwap") else 0
 
         if vwap_ext > vwap_limit:
-            return True, f"price extended {vwap_ext:.2f}% from VWAP (limit {vwap_limit:.2f}%, {regime})"
+            return (
+                True,
+                f"price extended {vwap_ext:.2f}% from VWAP (limit {vwap_limit:.2f}%, {regime})",
+            )
 
         if direction == "CALL":
-            levels = [tech.get("orb_high"), tech.get("premarket_high"), tech.get("prev_high")]
+            levels = [
+                tech.get("orb_high"),
+                tech.get("premarket_high"),
+                tech.get("prev_high"),
+            ]
             label = "breakout"
         else:
-            levels = [tech.get("orb_low"), tech.get("premarket_low"), tech.get("prev_low")]
+            levels = [
+                tech.get("orb_low"),
+                tech.get("premarket_low"),
+                tech.get("prev_low"),
+            ]
             label = "breakdown"
 
         extension = max([abs(pct_diff(price, x)) for x in levels if x] or [0])
 
         if extension > orb_limit:
-            return True, f"price extended {extension:.2f}% beyond {label} level (limit {orb_limit:.2f}%, {regime})"
+            return (
+                True,
+                f"price extended {extension:.2f}% beyond {label} level (limit {orb_limit:.2f}%, {regime})",
+            )
 
         return False, "not extended"
 
@@ -1008,12 +1287,18 @@ class StockTechnicalBase:
 
         if self.call_above_pm_or_pd_high(tech):
             score += A_PLUS_BREAKOUT_BONUS
-            reasons.append("A+ CALL condition met: price above premarket high or previous day high")
+            reasons.append(
+                "A+ CALL condition met: price above premarket high or previous day high"
+            )
         elif REQUIRE_PM_OR_PD_BREAK_FOR_A_PLUS:
             score -= A_PLUS_BREAKOUT_PENALTY
-            reasons.append("A+ CALL blocked: price not above premarket high or previous day high")
+            reasons.append(
+                "A+ CALL blocked: price not above premarket high or previous day high"
+            )
 
-        sector_status, sector_reason = self.get_sector_confirmation(tech["ticker"], "CALL")
+        sector_status, sector_reason = self.get_sector_confirmation(
+            tech["ticker"], "CALL"
+        )
 
         if sector_status == "CONFIRMED":
             score += SECTOR_ETF_WEIGHT
@@ -1028,7 +1313,7 @@ class StockTechnicalBase:
         if ENABLE_REGIME_SCORING and self.get_market_regime() == "CHOP":
             score -= CHOP_MIN_SCORE_BONUS
             reasons.append("chop regime: stricter CALL scoring")
-                        
+
         return {
             "direction": "CALL",
             "score": max(score, 0),
@@ -1165,12 +1450,18 @@ class StockTechnicalBase:
 
         if self.put_below_pm_or_pd_low(tech):
             score += A_PLUS_BREAKOUT_BONUS
-            reasons.append("A+ PUT condition met: price below premarket low or previous day low")
+            reasons.append(
+                "A+ PUT condition met: price below premarket low or previous day low"
+            )
         elif REQUIRE_PM_OR_PD_BREAK_FOR_A_PLUS:
             score -= A_PLUS_BREAKOUT_PENALTY
-            reasons.append("A+ PUT blocked: price not below premarket low or previous day low")
+            reasons.append(
+                "A+ PUT blocked: price not below premarket low or previous day low"
+            )
 
-        sector_status, sector_reason = self.get_sector_confirmation(tech["ticker"], "PUT")
+        sector_status, sector_reason = self.get_sector_confirmation(
+            tech["ticker"], "PUT"
+        )
 
         if sector_status == "CONFIRMED":
             score += SECTOR_ETF_WEIGHT
@@ -1185,7 +1476,7 @@ class StockTechnicalBase:
         if ENABLE_REGIME_SCORING and self.get_market_regime() == "CHOP":
             score -= CHOP_MIN_SCORE_BONUS
             reasons.append("chop regime: stricter PUT scoring")
-                        
+
         return {
             "direction": "PUT",
             "score": max(score, 0),

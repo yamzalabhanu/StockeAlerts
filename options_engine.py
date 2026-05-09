@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,10 @@ class OptionCandidate:
     open_interest: Optional[int]
     status: str
     reason: str
+    recommendation_score: Optional[float] = None
+    liquidity_score: Optional[float] = None
+    volume_oi_ratio: Optional[float] = None
+    dollar_volume: Optional[float] = None
 
 
 @dataclass
@@ -101,9 +106,10 @@ def _next_fridays(min_dte: int = MIN_DTE, max_dte: int = MAX_DTE) -> list[str]:
 
 
 def _option_side_from_signal(signal: str) -> Optional[str]:
-    if "BULLISH" in signal or "UPTREND" in signal:
+    signal = str(signal or "").upper()
+    if "CALL" in signal or "BULLISH" in signal or "UPTREND" in signal:
         return "call"
-    if "BEARISH" in signal or "DOWNTREND" in signal:
+    if "PUT" in signal or "BEARISH" in signal or "DOWNTREND" in signal:
         return "put"
     return None
 
@@ -556,47 +562,140 @@ def format_options_flow(report: OptionsFlowReport) -> str:
     )
 
 
-def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
-    """Pick a liquid near-ATM option contract using Polygon snapshot data."""
-    option_type = _option_side_from_signal(analysis.get("signal", ""))
+def _empty_option_candidate(symbol: str, option_type: str, status: str, reason: str) -> OptionCandidate:
+    return OptionCandidate(
+        underlying=symbol,
+        contract_symbol="",
+        option_type=option_type.upper() if option_type else "",
+        strike=0,
+        expiry="",
+        dte=0,
+        bid=None,
+        ask=None,
+        mid=None,
+        spread_pct=None,
+        delta=None,
+        gamma=None,
+        theta=None,
+        implied_volatility=None,
+        volume=None,
+        open_interest=None,
+        status=status,
+        reason=reason,
+    )
+
+
+def _log_score(value: int, cap: float, scale: float = 5.0) -> float:
+    if value <= 0:
+        return 0.0
+    return min(cap, math.log10(value + 1) * scale)
+
+
+def _score_option_candidate(
+    *,
+    strike: float,
+    price: float,
+    volume: int,
+    oi: int,
+    spread: Optional[float],
+    delta: Optional[float],
+    iv: Optional[float],
+    mid: Optional[float],
+) -> tuple[float, float, float, float]:
+    """Score a contract with a heavy OI/volume bias for actionable liquidity."""
+    distance_pct = abs(strike - price) / price if price else 1.0
+    atm_score = max(0.0, 22.0 * (1.0 - min(distance_pct, 0.12) / 0.12))
+
+    volume_score = _log_score(volume, 28.0, 6.0)
+    oi_score = _log_score(oi, 24.0, 5.5)
+    volume_oi_ratio = volume / max(oi, 1)
+    participation_score = min(16.0, volume_oi_ratio * 28.0)
+    liquidity_score = volume_score + oi_score + participation_score
+
+    spread_score = 8.0
+    if spread is not None:
+        spread_score = max(0.0, 12.0 * (1.0 - min(spread, MAX_SPREAD_PCT) / max(MAX_SPREAD_PCT, 0.01)))
+
+    delta_score = 6.0
+    if delta is not None:
+        target_mid = (TARGET_MIN_DELTA + TARGET_MAX_DELTA) / 2
+        delta_score = max(0.0, 10.0 * (1.0 - abs(abs(delta) - target_mid) / max(target_mid, 0.01)))
+
+    iv_score = 5.0
+    if iv is not None:
+        iv_score = max(0.0, 8.0 * (1.0 - min(iv, MAX_IV) / max(MAX_IV, 0.01)))
+
+    premium_score = 0.0
+    if mid:
+        premium_score = max(0.0, min(4.0, 4.0 - (mid / max(price, 1.0)) * 25.0))
+
+    total_score = atm_score + liquidity_score + spread_score + delta_score + iv_score + premium_score
+    return total_score, liquidity_score, volume_oi_ratio, distance_pct
+
+
+def select_option_contract(
+    symbol: str,
+    analysis: dict,
+    client: Optional[OptionsApiClient] = None,
+) -> OptionCandidate:
+    """Recommend the best directional option contract using Polygon/Massive snapshots.
+
+    The selector still enforces spread, IV, delta, DTE, volume, and OI guardrails, but
+    the ranking now emphasizes contracts with strong open interest, same-day volume,
+    and healthy volume/OI participation so alerts recommend a contract traders can
+    realistically enter and exit.
+    """
+    option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
     if not option_type:
-        return OptionCandidate(symbol, "", "", 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "No directional option side")
+        return _empty_option_candidate(symbol, "", "SKIP", "No directional option side")
 
-    if not POLYGON_API_KEY:
-        return OptionCandidate(symbol, "", option_type.upper(), 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "POLYGON_API_KEY not set")
+    api = client or OptionsApiClient()
+    if not api.configured:
+        return _empty_option_candidate(symbol, option_type, "SKIP", "OPTIONS_API_KEY, MASSIVE_API_KEY, or POLYGON_API_KEY not set")
 
-    price = float(analysis.get("price", 0))
+    price = _safe_float(analysis.get("price"))
+    if price <= 0:
+        return _empty_option_candidate(symbol, option_type, "SKIP", "Underlying price missing for option recommendation")
+
     expiries = _next_fridays()
-    best = None
+    best: Optional[OptionCandidate] = None
     best_score = -10**9
+    rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "delta": 0, "dte": 0}
 
     for expiry in expiries:
-        url = f"https://api.polygon.io/v3/snapshot/options/{symbol}"
-        params = {
-            "apiKey": POLYGON_API_KEY,
-            "expiration_date": expiry,
-            "contract_type": option_type,
-            "limit": 250,
-        }
         try:
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
+            results = api.option_snapshots(
+                symbol,
+                expiration_date=expiry,
+                contract_type=option_type,
+                limit=250,
+            )
         except Exception:
             continue
 
         for item in results:
-            details = item.get("details", {})
-            strike = float(details.get("strike_price") or 0)
-            contract = details.get("ticker", "")
-            exp = details.get("expiration_date", expiry)
-            dte = (datetime.fromisoformat(exp).date() - datetime.utcnow().date()).days
+            details = item.get("details", {}) or {}
+            strike = _strike(details)
+            contract = _option_ticker(details)
+            exp = _expiration_date(details) or expiry
+            if not contract or not strike:
+                continue
+
+            try:
+                dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
+            except ValueError:
+                dte = (datetime.fromisoformat(expiry).date() - datetime.now(timezone.utc).date()).days
+            if dte < MIN_DTE or dte > MAX_DTE:
+                rejection_counts["dte"] += 1
+                continue
 
             quote = item.get("last_quote", {}) or {}
             bid = quote.get("bid")
             ask = quote.get("ask")
-            mid = ((bid + ask) / 2) if bid is not None and ask is not None else None
-            spread = _spread_pct(bid, ask)
+            bid_float = _safe_float(bid) if bid is not None else None
+            ask_float = _safe_float(ask) if ask is not None else None
+            mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+            spread = _spread_pct(bid_float, ask_float)
 
             greeks = item.get("greeks", {}) or {}
             delta = greeks.get("delta")
@@ -605,26 +704,37 @@ def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
             iv = item.get("implied_volatility")
 
             day = item.get("day", {}) or {}
-            volume = day.get("volume") or 0
-            oi = item.get("open_interest") or 0
+            volume = _safe_int(day.get("volume"))
+            oi = _safe_int(item.get("open_interest"))
 
             if spread is not None and spread > MAX_SPREAD_PCT:
+                rejection_counts["spread"] += 1
                 continue
             if volume < MIN_OPTION_VOLUME:
+                rejection_counts["volume"] += 1
                 continue
             if oi < MIN_OPTION_OI:
+                rejection_counts["oi"] += 1
                 continue
-            if iv is not None and float(iv) > MAX_IV:
+            if iv is not None and _safe_float(iv) > MAX_IV:
+                rejection_counts["iv"] += 1
                 continue
-            if delta is not None and not (TARGET_MIN_DELTA <= abs(float(delta)) <= TARGET_MAX_DELTA):
+            if delta is not None and not (TARGET_MIN_DELTA <= abs(_safe_float(delta)) <= TARGET_MAX_DELTA):
+                rejection_counts["delta"] += 1
                 continue
 
-            atm_score = -abs(strike - price)
-            liq_score = (volume / 100) + (oi / 1000)
-            spread_score = -(spread or MAX_SPREAD_PCT)
-            iv_score = -(float(iv) * 5) if iv is not None else 0
-            score = atm_score + liq_score + spread_score + iv_score
+            score, liquidity_score, volume_oi_ratio, distance_pct = _score_option_candidate(
+                strike=strike,
+                price=price,
+                volume=volume,
+                oi=oi,
+                spread=spread,
+                delta=_safe_float(delta) if delta is not None else None,
+                iv=_safe_float(iv) if iv is not None else None,
+                mid=mid,
+            )
 
+            dollar_volume = volume * (mid or 0.0) * 100
             if score > best_score:
                 best_score = score
                 best = OptionCandidate(
@@ -634,24 +744,39 @@ def select_option_contract(symbol: str, analysis: dict) -> OptionCandidate:
                     strike=strike,
                     expiry=exp,
                     dte=dte,
-                    bid=bid,
-                    ask=ask,
+                    bid=bid_float,
+                    ask=ask_float,
                     mid=round(mid, 2) if mid else None,
-                    spread_pct=round(spread, 2) if spread else None,
-                    delta=round(float(delta), 3) if delta is not None else None,
-                    gamma=round(float(gamma), 4) if gamma is not None else None,
-                    theta=round(float(theta), 4) if theta is not None else None,
-                    implied_volatility=round(float(iv), 3) if iv is not None else None,
-                    volume=int(volume),
-                    open_interest=int(oi),
+                    spread_pct=round(spread, 2) if spread is not None else None,
+                    delta=round(_safe_float(delta), 3) if delta is not None else None,
+                    gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
+                    theta=round(_safe_float(theta), 4) if theta is not None else None,
+                    implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
+                    volume=volume,
+                    open_interest=oi,
                     status="OK",
-                    reason="Liquid near-ATM contract selected with IV filter",
+                    reason=(
+                        "Recommended by Polygon/Massive snapshot liquidity: "
+                        f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
+                        f"{distance_pct * 100:.1f}% from spot."
+                    ),
+                    recommendation_score=round(score, 2),
+                    liquidity_score=round(liquidity_score, 2),
+                    volume_oi_ratio=round(volume_oi_ratio, 3),
+                    dollar_volume=round(dollar_volume, 2),
                 )
 
     if best:
         return best
 
-    return OptionCandidate(symbol, "", option_type.upper(), 0, "", 0, None, None, None, None, None, None, None, None, None, None, "SKIP", "No option passed liquidity, spread, delta, and IV filters")
+    rejection_text = ", ".join(f"{name}={count}" for name, count in rejection_counts.items() if count)
+    suffix = f" ({rejection_text})" if rejection_text else ""
+    return _empty_option_candidate(
+        symbol,
+        option_type,
+        "SKIP",
+        f"No option passed OI/volume, spread, delta, DTE, and IV filters{suffix}",
+    )
 
 
 def option_to_dict(candidate: OptionCandidate) -> dict:
@@ -677,5 +802,7 @@ def format_option_alert(candidate: OptionCandidate) -> str:
         f"Options: {candidate.contract_symbol}\n"
         f"Type: {candidate.option_type} | Strike: {candidate.strike} | Exp: {candidate.expiry} ({candidate.dte} DTE)\n"
         f"Bid/Ask/Mid: {candidate.bid}/{candidate.ask}/{candidate.mid} | Spread: {candidate.spread_pct}%\n"
-        f"Delta: {candidate.delta} | IV: {candidate.implied_volatility} | Vol/OI: {candidate.volume}/{candidate.open_interest}"
+        f"Delta: {candidate.delta} | IV: {candidate.implied_volatility} | "
+        f"Vol/OI: {candidate.volume}/{candidate.open_interest} ({candidate.volume_oi_ratio}) | "
+        f"Score: {candidate.recommendation_score}"
     )

@@ -17,7 +17,7 @@ from execution_quality import GOOD as EXECUTION_GOOD, WARNING as EXECUTION_WARNI
 from setup_filters import PASS, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
-from options_engine import analyze_options_flow, options_flow_to_dict
+from options_engine import analyze_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
 
 SWING_ALERT_CACHE = {}
 
@@ -260,8 +260,16 @@ def process_swing_candidate(bot, ticker, tech):
                 setup["score"] = round(min(100, float(setup.get("score", 0) or 0) + flow_report.score * 0.08), 2)
             elif flow_report.bias in {"BULLISH", "BEARISH"}:
                 setup.setdefault("reasons", []).append(f"Options flow conflict: {flow_report.bias}")
+
+        option_contract = select_option_contract(
+            ticker,
+            {"signal": setup.get("direction"), "price": setup.get("price")},
+        )
+        setup["option_contract"] = option_to_dict(option_contract)
+        if option_contract.status == "OK":
+            setup["score"] = round(min(100, float(setup.get("score", 0) or 0) + min(5, (option_contract.recommendation_score or 0) * 0.04)), 2)
     except Exception as e:
-        print(f"{ticker}: swing options flow skipped: {e}")
+        print(f"{ticker}: swing options flow/contract selection skipped: {e}")
 
     telegram_sent = False
     try:

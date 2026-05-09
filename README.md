@@ -186,6 +186,11 @@ The options layer evaluates:
 - Theta
 - Implied volatility
 - Volume and open interest
+- Volume/OI participation ratio
+- OI/volume-weighted recommendation score
+- Estimated option dollar volume
+
+The selector now uses the same Polygon/Massive-compatible snapshot client as the options-flow engine. When a directional intraday or swing setup passes, the bot can attach an `Option Pick` that prioritizes contracts with strong same-day volume, high open interest, acceptable spreads, target delta, and nearby strikes instead of simply choosing the closest ATM contract.
 
 The true options flow and liquidity engine can also use Polygon/Massive-compatible options APIs to score explosive intraday and swing conditions:
 
@@ -196,7 +201,7 @@ The true options flow and liquidity engine can also use Polygon/Massive-compatib
 - IV expansion proxies
 - Delta imbalance and call/put premium imbalance
 
-Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, and `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`.
+Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, and `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`.
 
 Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
 

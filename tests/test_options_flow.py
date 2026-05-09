@@ -2,7 +2,7 @@ import unittest
 
 from unittest.mock import patch
 
-from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict
+from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict, select_option_contract
 
 
 class FakeOptionsClient:
@@ -46,6 +46,42 @@ class FakeOptionsClient:
         return []
 
 
+class FakeSelectionClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date", "2099-01-15")
+        return [
+            {
+                "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
+                "last_quote": {"bid": 4.9, "ask": 5.1},
+                "day": {"volume": 900},
+                "open_interest": 5000,
+                "greeks": {"delta": 0.52, "gamma": 0.04, "theta": -0.08},
+                "implied_volatility": 0.58,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 2.4, "ask": 2.7},
+                "day": {"volume": 5000},
+                "open_interest": 12000,
+                "greeks": {"delta": 0.47, "gamma": 0.05, "theta": -0.07},
+                "implied_volatility": 0.62,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": expiry},
+                "last_quote": {"bid": 1.0, "ask": 1.8},
+                "day": {"volume": 20000},
+                "open_interest": 100,
+                "greeks": {"delta": 0.25},
+                "implied_volatility": 0.7,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class MissingOptionsClient:
     configured = False
 
@@ -78,6 +114,24 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertIsInstance(data["signals"][0], dict)
         self.assertIn("Options Flow", text)
         self.assertIn("BULLISH", text)
+
+
+    def test_select_option_contract_recommends_high_oi_volume_candidate(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]), \
+             patch("options_engine.MIN_DTE", 1), \
+             patch("options_engine.MAX_DTE", 30000):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 101},
+                client=FakeSelectionClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZTESTC00105000")
+        self.assertGreater(candidate.recommendation_score, 0)
+        self.assertGreater(candidate.liquidity_score, 0)
+        self.assertAlmostEqual(candidate.volume_oi_ratio, round(5000 / 12000, 3))
+        self.assertIn("OI", candidate.reason)
 
     def test_missing_api_key_returns_skip_report(self):
         report = analyze_options_flow("XYZ", "CALL", client=MissingOptionsClient())

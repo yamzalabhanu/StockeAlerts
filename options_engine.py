@@ -633,6 +633,139 @@ def _score_option_candidate(
     return total_score, liquidity_score, volume_oi_ratio, distance_pct
 
 
+def _candidate_from_chain_item(
+    symbol: str,
+    option_type: str,
+    item: dict[str, Any],
+    price: float,
+    fallback_expiry: str = "",
+) -> tuple[Optional[OptionCandidate], Optional[str]]:
+    details = item.get("details", {}) or {}
+    strike = _strike(details)
+    contract = _option_ticker(details)
+    exp = _expiration_date(details) or fallback_expiry
+    contract_type = _option_type(details) or option_type
+    if not contract or not strike:
+        return None, "missing_contract"
+    if contract_type and contract_type != option_type:
+        return None, "side"
+
+    try:
+        dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
+    except ValueError:
+        return None, "dte"
+    if dte < MIN_DTE or dte > MAX_DTE:
+        return None, "dte"
+
+    quote = item.get("last_quote", {}) or {}
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    bid_float = _safe_float(bid) if bid is not None else None
+    ask_float = _safe_float(ask) if ask is not None else None
+    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    spread = _spread_pct(bid_float, ask_float)
+
+    greeks = item.get("greeks", {}) or {}
+    delta = greeks.get("delta")
+    gamma = greeks.get("gamma")
+    theta = greeks.get("theta")
+    iv = item.get("implied_volatility")
+
+    day = item.get("day", {}) or {}
+    volume = _safe_int(day.get("volume"))
+    oi = _safe_int(item.get("open_interest"))
+
+    if spread is not None and spread > MAX_SPREAD_PCT:
+        return None, "spread"
+    if volume < MIN_OPTION_VOLUME:
+        return None, "volume"
+    if oi < MIN_OPTION_OI:
+        return None, "oi"
+    if iv is not None and _safe_float(iv) > MAX_IV:
+        return None, "iv"
+    if delta is not None and not (TARGET_MIN_DELTA <= abs(_safe_float(delta)) <= TARGET_MAX_DELTA):
+        return None, "delta"
+
+    score, liquidity_score, volume_oi_ratio, distance_pct = _score_option_candidate(
+        strike=strike,
+        price=price,
+        volume=volume,
+        oi=oi,
+        spread=spread,
+        delta=_safe_float(delta) if delta is not None else None,
+        iv=_safe_float(iv) if iv is not None else None,
+        mid=mid,
+    )
+
+    dollar_volume = volume * (mid or 0.0) * 100
+    candidate = OptionCandidate(
+        underlying=symbol,
+        contract_symbol=contract,
+        option_type=option_type.upper(),
+        strike=strike,
+        expiry=exp,
+        dte=dte,
+        bid=bid_float,
+        ask=ask_float,
+        mid=round(mid, 2) if mid else None,
+        spread_pct=round(spread, 2) if spread is not None else None,
+        delta=round(_safe_float(delta), 3) if delta is not None else None,
+        gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
+        theta=round(_safe_float(theta), 4) if theta is not None else None,
+        implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
+        volume=volume,
+        open_interest=oi,
+        status="OK",
+        reason=(
+            "Recommended from option-chain liquidity: "
+            f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
+            f"{distance_pct * 100:.1f}% from spot."
+        ),
+        recommendation_score=round(score, 2),
+        liquidity_score=round(liquidity_score, 2),
+        volume_oi_ratio=round(volume_oi_ratio, 3),
+        dollar_volume=round(dollar_volume, 2),
+    )
+    return candidate, None
+
+
+def recommend_option_contracts_from_chain(
+    symbol: str,
+    option_chain: list[dict[str, Any]],
+    analysis: dict,
+    *,
+    top_n: int = 3,
+) -> list[OptionCandidate]:
+    """Rank option-chain snapshots by high volume, OI, and tradable liquidity.
+
+    This helper is useful when an option chain has already been fetched by another
+    provider or test fixture. It applies the same spread, IV, delta, DTE, volume,
+    and OI guardrails as the live selector, then returns the highest-scoring
+    contracts with the strongest same-day volume and open interest profile.
+    """
+    option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
+    price = _safe_float(analysis.get("price"))
+    if not option_type or price <= 0 or top_n <= 0:
+        return []
+
+    candidates: list[OptionCandidate] = []
+    for item in option_chain:
+        candidate, _ = _candidate_from_chain_item(symbol, option_type, item, price)
+        if candidate:
+            candidates.append(candidate)
+
+    candidates.sort(
+        key=lambda c: (
+            c.recommendation_score or 0,
+            c.liquidity_score or 0,
+            c.open_interest or 0,
+            c.volume or 0,
+        ),
+        reverse=True,
+    )
+    return candidates[:top_n]
+
+
 def select_option_contract(
     symbol: str,
     analysis: dict,

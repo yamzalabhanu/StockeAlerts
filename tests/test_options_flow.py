@@ -2,7 +2,7 @@ import unittest
 
 from unittest.mock import patch
 
-from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict, select_option_contract
+from options_engine import analyze_options_flow, format_options_flow, options_flow_to_dict, recommend_option_contracts_from_chain, select_option_contract
 
 
 class FakeOptionsClient:
@@ -132,6 +132,51 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertGreater(candidate.liquidity_score, 0)
         self.assertAlmostEqual(candidate.volume_oi_ratio, round(5000 / 12000, 3))
         self.assertIn("OI", candidate.reason)
+
+    def test_recommend_option_contracts_from_chain_ranks_by_volume_and_oi(self):
+        chain = [
+            {
+                "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 4.9, "ask": 5.1},
+                "day": {"volume": 900},
+                "open_interest": 5000,
+                "greeks": {"delta": 0.52, "gamma": 0.04, "theta": -0.08},
+                "implied_volatility": 0.58,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.4, "ask": 2.7},
+                "day": {"volume": 5000},
+                "open_interest": 12000,
+                "greeks": {"delta": 0.47, "gamma": 0.05, "theta": -0.07},
+                "implied_volatility": 0.62,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 1.0, "ask": 1.8},
+                "day": {"volume": 20000},
+                "open_interest": 100,
+                "greeks": {"delta": 0.25},
+                "implied_volatility": 0.7,
+            },
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 101},
+                top_n=2,
+            )
+
+        self.assertEqual([candidate.contract_symbol for candidate in candidates], [
+            "O:XYZTESTC00105000",
+            "O:XYZTESTC00100000",
+        ])
+        self.assertTrue(all(candidate.status == "OK" for candidate in candidates))
+        self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
+        self.assertGreater(candidates[0].volume, candidates[1].volume)
+        self.assertIn("option-chain liquidity", candidates[0].reason)
 
     def test_missing_api_key_returns_skip_report(self):
         report = analyze_options_flow("XYZ", "CALL", client=MissingOptionsClient())

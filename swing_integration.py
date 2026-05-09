@@ -21,14 +21,14 @@ from performance_learning import calibrate_confidence, priority_bonus, setup_str
 SWING_ALERT_CACHE = {}
 
 
-SWING_MIN_BENCHMARK_RR = 2.0
-SWING_REQUIRED_DECISION = "A+"
-SWING_MIN_COMPOSITE_SCORE = 90
+SWING_MIN_BENCHMARK_RR = 1.8
+SWING_ALLOWED_DECISIONS = {"A+", "A"}
+SWING_MIN_COMPOSITE_SCORE = 88
 SWING_DIRECTION_REGIMES = {"CALL": "TRENDING_BULL", "PUT": "TRENDING_BEAR"}
 SWING_ALLOWED_EXECUTION = {EXECUTION_GOOD, EXECUTION_WARNING}
 SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING}
-SWING_REQUIRED_CHART_STRUCTURE = "ELITE"
-SWING_REQUIRED_MTF_STRUCTURE = "STRONG_ALIGNMENT"
+SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
+SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
 
 
 def swing_benchmark_reject_reasons(setup, reasoning):
@@ -42,8 +42,9 @@ def swing_benchmark_reject_reasons(setup, reasoning):
         reasons.append("direction is not CALL or PUT")
 
     decision = reasoning.get("decision")
-    if decision != SWING_REQUIRED_DECISION:
-        reasons.append(f"decision {decision or 'missing'} is not {SWING_REQUIRED_DECISION}")
+    if decision not in SWING_ALLOWED_DECISIONS:
+        allowed = "/".join(sorted(SWING_ALLOWED_DECISIONS))
+        reasons.append(f"decision {decision or 'missing'} is not {allowed}")
 
     composite_score = safe_float(reasoning.get("final_score") or setup.get("score"))
     if composite_score < SWING_MIN_COMPOSITE_SCORE:
@@ -63,8 +64,9 @@ def swing_benchmark_reject_reasons(setup, reasoning):
         reasons.append(f"regime {regime or 'missing'} is not {required_regime}")
 
     mtf_structure = (reasoning.get("mtf") or {}).get("structure")
-    if mtf_structure != SWING_REQUIRED_MTF_STRUCTURE:
-        reasons.append(f"MTF {mtf_structure or 'missing'} is not {SWING_REQUIRED_MTF_STRUCTURE}")
+    if mtf_structure not in SWING_ALLOWED_MTF_STRUCTURES:
+        allowed = "/".join(sorted(SWING_ALLOWED_MTF_STRUCTURES))
+        reasons.append(f"MTF {mtf_structure or 'missing'} is not {allowed}")
 
     execution = (reasoning.get("execution") or {}).get("quality")
     if execution not in SWING_ALLOWED_EXECUTION:
@@ -77,14 +79,15 @@ def swing_benchmark_reject_reasons(setup, reasoning):
         reasons.append(f"setup filter {setup_filter or 'missing'} is not {allowed}")
 
     chart_structure = (reasoning.get("vision") or {}).get("quality")
-    if chart_structure != SWING_REQUIRED_CHART_STRUCTURE:
-        reasons.append(f"chart structure {chart_structure or 'missing'} is not {SWING_REQUIRED_CHART_STRUCTURE}")
+    if chart_structure not in SWING_ALLOWED_CHART_STRUCTURES:
+        allowed = "/".join(sorted(SWING_ALLOWED_CHART_STRUCTURES))
+        reasons.append(f"chart structure {chart_structure or 'missing'} is not {allowed}")
 
     return reasons
 
 
 def meets_swing_benchmark(setup, reasoning):
-    """Return True only for swing alerts matching the required elite criteria."""
+    """Return True for high-quality swing alerts that pass the relaxed benchmark."""
     return not swing_benchmark_reject_reasons(setup, reasoning)
 
 

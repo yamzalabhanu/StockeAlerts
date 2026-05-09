@@ -139,6 +139,19 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
 
+    def test_swing_benchmark_accepts_elite_a_plus_call_in_mixed_regime(self):
+        reasoning = self._reasoning()
+        reasoning["regime"]["regime"] = "MIXED"
+
+        self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
+
+    def test_swing_benchmark_rejects_non_elite_a_plus_call_in_mixed_regime(self):
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 99
+        reasoning["regime"]["regime"] = "MIXED"
+
+        self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
+
     def test_swing_benchmark_accepts_high_quality_a_setup(self):
         setup = self._setup()
         setup["risk_reward"] = 1.8

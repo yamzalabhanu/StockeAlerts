@@ -263,7 +263,7 @@ def process_swing_candidate(bot, ticker, tech):
 
         option_contract = select_option_contract(
             ticker,
-            {"signal": setup.get("direction"), "price": setup.get("price")},
+            {"signal": setup.get("direction"), "price": setup.get("price") or setup.get("entry")},
         )
         setup["option_contract"] = option_to_dict(option_contract)
         if option_contract.status == "OK":

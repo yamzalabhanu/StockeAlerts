@@ -30,6 +30,7 @@ SWING_ALLOWED_EXECUTION = {EXECUTION_GOOD, EXECUTION_WARNING}
 SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING}
 SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
 SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
+SWING_MIXED_REGIME_ELITE_SCORE = 100
 
 
 SWING_NON_BLOCKING_AI_REJECT_REASONS = {"Setup failed elite quality filters"}
@@ -43,6 +44,21 @@ def _blocking_ai_reject_reasons(reasoning):
         for reason in raw_reasons
         if str(reason) not in SWING_NON_BLOCKING_AI_REJECT_REASONS
     ]
+
+
+def _regime_matches_swing_direction(regime, required_regime, decision, composite_score):
+    """Return True when regime confirmation is strong enough for benchmark swings."""
+    if not required_regime:
+        return False
+
+    if regime == required_regime:
+        return True
+
+    return (
+        regime == "MIXED"
+        and decision == "A+"
+        and composite_score >= SWING_MIXED_REGIME_ELITE_SCORE
+    )
 
 
 def swing_benchmark_reject_reasons(setup, reasoning):
@@ -74,7 +90,12 @@ def swing_benchmark_reject_reasons(setup, reasoning):
 
     regime = (reasoning.get("regime") or {}).get("regime")
     required_regime = SWING_DIRECTION_REGIMES.get(direction)
-    if required_regime and regime != required_regime:
+    if required_regime and not _regime_matches_swing_direction(
+        regime,
+        required_regime,
+        decision,
+        composite_score,
+    ):
         reasons.append(f"regime {regime or 'missing'} is not {required_regime}")
 
     mtf_structure = (reasoning.get("mtf") or {}).get("structure")

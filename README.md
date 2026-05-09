@@ -772,3 +772,38 @@ MAX_OPTION_DTE=21
 # 👨‍💻 Author
 
 Bhanu Yamzala
+
+---
+
+### 👁️ AI Vision Chart Reader
+
+StockeAlerts can now capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read.
+
+The vision reader evaluates visual price action that numeric indicators often miss:
+
+- Failed breakouts and late chase risk
+- Volatility compression before expansion
+- Wedges and tightening structure
+- Exhaustion candles and rejection wicks
+- Trapped longs / trapped shorts
+- Liquidity grabs above resistance or below support
+- Overall trend quality: strong, healthy, mixed, choppy, or exhausted
+
+Use `chart_ai.analyze_chart_vision(symbol, analysis=tech, timeframe="D")` to screenshot the chart and return normalized JSON with `decision`, `direction`, `confidence`, `pattern`, key levels, feature flags, warnings, and summary. The normalized visual reading can be attached to a technical context as `tech["vision_chart"]`; `vision_ai.score_chart_structure()` will merge it into the existing chart-structure score so swing and reasoning gates can account for visual failed breakouts, compression, liquidity grabs, trapped traders, exhaustion, and trend quality.
+
+Required setup:
+
+| Setting | Meaning |
+|---|---|
+| `OPENAI_API_KEY` | Enables OpenAI Vision analysis |
+| `OPENAI_VISION_MODEL` | Optional model override, defaults to `gpt-4o-mini` |
+| Playwright Chromium | Required for TradingView screenshot capture (`playwright install chromium`) |
+
+Example:
+
+```python
+from chart_ai import analyze_chart_vision
+
+vision = await analyze_chart_vision("NASDAQ:NVDA", analysis=tech, timeframe="D")
+tech["vision_chart"] = vision
+```

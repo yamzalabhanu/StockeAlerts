@@ -11,6 +11,7 @@ from openai import OpenAI
 from playwright.async_api import async_playwright
 
 from config import OPENAI_VISION_MODEL
+from openai_models import chat_completion_options
 
 from bot_utils import safe_float, safe_int
 from symbol_utils import is_valid_symbol, normalize_symbol, tradingview_symbol
@@ -341,18 +342,20 @@ async def analyze_chart_vision(
     """Screenshot a TradingView chart, send it to OpenAI Vision, and return normalized analysis."""
     image_path = image_path or await capture_chart(symbol, timeframe=timeframe)
     response = (client or _openai_client()).chat.completions.create(
-        model=model,
-        temperature=0.1,
-        response_format={"type": "json_schema", "json_schema": _JSON_SCHEMA},
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": build_vision_prompt(symbol, timeframe, analysis)},
-                    {"type": "image_url", "image_url": {"url": _image_data_url(image_path), "detail": "high"}},
-                ],
-            }
-        ],
+        **chat_completion_options(
+            model=model,
+            temperature=0.1,
+            response_format={"type": "json_schema", "json_schema": _JSON_SCHEMA},
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": build_vision_prompt(symbol, timeframe, analysis)},
+                        {"type": "image_url", "image_url": {"url": _image_data_url(image_path), "detail": "high"}},
+                    ],
+                }
+            ],
+        )
     )
     content = response.choices[0].message.content
     return normalize_vision_reading(_extract_json(content), symbol, timeframe)

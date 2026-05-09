@@ -14,8 +14,8 @@ Trade: {trade}
 Current context: {current_context}
 
 Return exactly:
-Decision: HOLD / TRIM / EXIT
-Reason: one short paragraph
+Decision: HOLD / TRIM / SCALE / EXIT
+Reason: one short paragraph that weighs trend continuation, volume, regime, exhaustion, and projection decay
 Risk: LOW / MEDIUM / HIGH
 """
 

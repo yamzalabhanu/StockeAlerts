@@ -1,4 +1,5 @@
 from bot_utils import safe_float
+from chart_ai import score_vision_reading
 
 
 CLEAN_BREAKOUT = 'CLEAN_BREAKOUT'
@@ -21,6 +22,14 @@ def score_chart_structure(tech: dict, direction: str) -> dict:
     score = 0
     structure_tags = []
     warnings = []
+
+    visual_score = None
+    visual_reading = tech.get('vision_chart') or tech.get('visual_chart')
+    if isinstance(visual_reading, dict):
+        visual_score = score_vision_reading(visual_reading, direction)
+        score += safe_float(visual_score.get('score'), 0)
+        structure_tags.extend(visual_score.get('tags') or [])
+        warnings.extend(visual_score.get('warnings') or [])
 
     # Strong breakout structure
     if candle_body_pct is not None and candle_body_pct >= 65:
@@ -81,6 +90,7 @@ def score_chart_structure(tech: dict, direction: str) -> dict:
         'score': score,
         'tags': structure_tags,
         'warnings': warnings,
+        'visual': visual_score or {},
     }
 
 

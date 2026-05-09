@@ -1,0 +1,84 @@
+import datetime as dt
+import unittest
+from unittest.mock import patch
+
+import bot_technical
+from bot_technical import StockTechnicalBase
+
+
+class _Response:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class AutoWatchlistTests(unittest.TestCase):
+    def test_historical_watchlist_uses_active_tickers_and_grouped_daily_aggs(self):
+        bot = StockTechnicalBase(["BASE"])
+        responses = [
+            _Response(
+                {
+                    "results": [
+                        {"ticker": "AAA"},
+                        {"ticker": "BBB"},
+                        {"ticker": "CCC"},
+                    ]
+                }
+            ),
+            _Response(
+                {
+                    "results": [
+                        {"T": "AAA", "o": 10, "c": 11, "h": 11.25, "v": 3_000_000},
+                        {"T": "BBB", "o": 20, "c": 20.10, "h": 20.50, "v": 5_000_000},
+                        {"T": "CCC", "o": 6, "c": 7, "h": 7.10, "v": 8_000_000},
+                        {"T": "ZZZ", "o": 30, "c": 35, "h": 36, "v": 9_000_000},
+                    ]
+                }
+            ),
+        ]
+
+        with patch.object(bot_technical, "MIN_AUTO_VOLUME", 2_000_000), \
+             patch.object(bot_technical, "MIN_AUTO_CHANGE_PCT", 2.0), \
+             patch.object(bot_technical, "MIN_STOCK_PRICE", 8), \
+             patch.object(bot_technical, "AUTO_WATCHLIST_LIMIT", 10), \
+             patch.object(bot_technical.requests, "get", side_effect=responses) as get:
+            watchlist = bot.get_auto_watchlist(dt.date(2025, 1, 15))
+
+        self.assertEqual(watchlist, ["BASE", "AAA"])
+        self.assertIn("AAA", bot.state)
+        self.assertEqual(
+            get.call_args_list[0].kwargs["params"]["date"],
+            "2025-01-15",
+        )
+        self.assertIn(
+            "/v2/aggs/grouped/locale/us/market/stocks/2025-01-15",
+            get.call_args_list[1].args[0],
+        )
+
+    def test_reference_ticker_pagination_collects_active_symbols(self):
+        bot = StockTechnicalBase([])
+        responses = [
+            _Response(
+                {
+                    "results": [{"ticker": "AAA"}],
+                    "next_url": "https://api.polygon.io/v3/reference/tickers?cursor=NEXT",
+                }
+            ),
+            _Response({"results": [{"ticker": "BBB"}]}),
+        ]
+
+        with patch.object(bot_technical.requests, "get", side_effect=responses) as get:
+            tickers = bot.get_active_tickers_for_day("2025-02-03")
+
+        self.assertEqual(tickers, {"AAA", "BBB"})
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[1].kwargs["params"], {"apiKey": bot_technical.POLYGON_API_KEY})
+
+
+if __name__ == "__main__":
+    unittest.main()

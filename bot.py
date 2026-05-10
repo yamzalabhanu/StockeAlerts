@@ -304,8 +304,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             return False, "AI sees late breakout risk"
         if ai.get("verdict") == "BUY" and confidence >= MIN_AI_CONFIDENCE:
             return True, "AI approved"
-        if score >= 80 and confirmations >= 3 and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
-            return True, "override: strong AI-scored setup with intraday confirmation"
+        if score >= MIN_SCORE and confirmations >= 3 and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
+            return True, "override: high-quality intraday setup with confirmation"
         return False, ai.get("reason", "AI did not approve")
 
     async def build_candidate(self, ticker):

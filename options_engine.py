@@ -753,12 +753,23 @@ def _candidate_from_chain_item(
 
 
 def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
-    """Rank candidates by actionable liquidity before moneyness convenience."""
+    """Rank candidates by raw volume and OI first, then quality tie-breakers.
+
+    The alert should not choose a thinner contract when another eligible contract
+    has both higher same-day volume and higher open interest.  A volume*OI
+    liquidity product makes that Pareto-dominant contract rank higher even when
+    the thinner contract has a better ATM/delta score or a higher volume/OI
+    turnover ratio.
+    """
+    volume = candidate.volume or 0
+    oi = candidate.open_interest or 0
+    raw_liquidity = volume * oi
     return (
-        candidate.liquidity_score or 0.0,
-        candidate.volume or 0,
-        candidate.open_interest or 0,
+        raw_liquidity,
+        volume,
+        oi,
         candidate.dollar_volume or 0.0,
+        candidate.liquidity_score or 0.0,
         candidate.recommendation_score or 0.0,
         -(candidate.spread_pct or MAX_SPREAD_PCT),
     )

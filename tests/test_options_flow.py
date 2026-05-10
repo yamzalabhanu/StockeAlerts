@@ -211,6 +211,39 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
         self.assertGreater(candidates[1].recommendation_score, candidates[0].recommendation_score)
 
+    def test_recommend_option_contracts_never_penalizes_higher_volume_and_oi_for_lower_turnover(self):
+        chain = [
+            {
+                "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.95, "ask": 3.05},
+                "day": {"volume": 900},
+                "open_interest": 900,
+                "greeks": {"delta": 0.5},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.4, "ask": 2.6},
+                "day": {"volume": 3000},
+                "open_interest": 20000,
+                "greeks": {"delta": 0.45},
+                "implied_volatility": 0.5,
+            },
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 100},
+                top_n=2,
+            )
+
+        self.assertEqual(candidates[0].contract_symbol, "O:XYZTESTC00105000")
+        self.assertGreater(candidates[0].volume, candidates[1].volume)
+        self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
+        self.assertGreater(candidates[1].volume_oi_ratio, candidates[0].volume_oi_ratio)
+
     def test_option_volume_and_oi_provider_aliases_are_used(self):
         chain = [
             {

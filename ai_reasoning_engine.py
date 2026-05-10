@@ -8,6 +8,12 @@ from multi_timeframe_engine import analyze_multi_timeframe_structure
 from setup_filters import evaluate_setup_quality
 from vision_ai import score_chart_structure
 from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key
+from config import (
+    ALLOW_EXECUTION_WARNING,
+    ALLOW_MTF_MIXED,
+    ALLOW_SETUP_WARNING,
+    MIN_SCORE,
+)
 
 
 def _safe_float(value, default=0.0):
@@ -78,6 +84,7 @@ def build_reasoning_report(
         vision = {}
 
     score = base_score
+    high_quality_intraday = trade_type == "INTRADAY" and base_score >= MIN_SCORE
     reasons = []
     warnings = []
     reject_reasons = []
@@ -118,8 +125,11 @@ def build_reasoning_report(
         reasons.append("Good multi-timeframe alignment")
 
     elif mtf_structure == "MIXED_ALIGNMENT":
-        score -= 4
-        warnings.append("Mixed multi-timeframe alignment")
+        if high_quality_intraday and ALLOW_MTF_MIXED:
+            warnings.append("Mixed multi-timeframe alignment allowed for high-quality intraday setup")
+        else:
+            score -= 4
+            warnings.append("Mixed multi-timeframe alignment")
 
     elif mtf_structure:
         score -= 16
@@ -132,7 +142,10 @@ def build_reasoning_report(
         reasons.extend((execution.get("strengths") or [])[:2])
 
     elif ex_quality == "WARNING":
-        score -= 3
+        if high_quality_intraday and ALLOW_EXECUTION_WARNING:
+            warnings.append("Execution warning allowed for high-quality intraday setup")
+        else:
+            score -= 3
         warnings.extend((execution.get("warnings") or [])[:2])
 
     elif ex_quality:
@@ -147,7 +160,10 @@ def build_reasoning_report(
         reasons.extend((setup_quality.get("reasons") or [])[:2])
 
     elif filter_status == "WARNING":
-        score -= 4
+        if high_quality_intraday and ALLOW_SETUP_WARNING:
+            warnings.append("Setup warning allowed for high-quality intraday setup")
+        else:
+            score -= 4
         warnings.extend((setup_quality.get("warnings") or [])[:2])
 
     elif filter_status:

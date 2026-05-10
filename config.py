@@ -13,6 +13,12 @@ ENABLE_INTRADAY_ALERTS = True
 ENABLE_SWING_ALERTS = True
 
 INTRADAY_MIN_SCORE = 85
+# High-quality intraday setups can pass with non-blocking WARNING states
+# when these controls are enabled and the setup score reaches MIN_SCORE.
+ALLOW_EXECUTION_WARNING = True
+ALLOW_MTF_MIXED = True
+ALLOW_SETUP_WARNING = True
+MIN_SCORE = 95
 SWING_MIN_SCORE = 85
 SWING_MIN_REASONS = 4
 SWING_A_PLUS_SCORE = 90

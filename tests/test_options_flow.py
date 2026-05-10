@@ -70,7 +70,7 @@ class FakeSelectionClient:
             },
             {
                 "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": expiry},
-                "last_quote": {"bid": 1.0, "ask": 1.8},
+                "last_quote": {"bid": 1.0, "ask": 1.1},
                 "day": {"volume": 20000},
                 "open_interest": 100,
                 "greeks": {"delta": 0.25},
@@ -116,7 +116,7 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertIn("BULLISH", text)
 
 
-    def test_select_option_contract_recommends_high_oi_volume_candidate(self):
+    def test_select_option_contract_recommends_exceptional_volume_candidate(self):
         with patch("options_engine._next_fridays", return_value=["2099-01-15"]), \
              patch("options_engine.MIN_DTE", 1), \
              patch("options_engine.MAX_DTE", 30000):
@@ -127,11 +127,11 @@ class OptionsFlowTests(unittest.TestCase):
             )
 
         self.assertEqual(candidate.status, "OK")
-        self.assertEqual(candidate.contract_symbol, "O:XYZTESTC00105000")
+        self.assertEqual(candidate.contract_symbol, "O:XYZTESTC00110000")
         self.assertGreater(candidate.recommendation_score, 0)
         self.assertGreater(candidate.liquidity_score, 0)
-        self.assertAlmostEqual(candidate.volume_oi_ratio, round(5000 / 12000, 3))
-        self.assertIn("OI", candidate.reason)
+        self.assertAlmostEqual(candidate.volume_oi_ratio, round(20000 / 100, 3))
+        self.assertIn("exceptional same-day volume", candidate.reason)
 
     def test_recommend_option_contracts_from_chain_ranks_by_volume_and_oi(self):
         chain = [
@@ -153,7 +153,7 @@ class OptionsFlowTests(unittest.TestCase):
             },
             {
                 "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": "2099-01-15"},
-                "last_quote": {"bid": 1.0, "ask": 1.8},
+                "last_quote": {"bid": 1.0, "ask": 1.1},
                 "day": {"volume": 20000},
                 "open_interest": 100,
                 "greeks": {"delta": 0.25},
@@ -170,13 +170,13 @@ class OptionsFlowTests(unittest.TestCase):
             )
 
         self.assertEqual([candidate.contract_symbol for candidate in candidates], [
+            "O:XYZTESTC00110000",
             "O:XYZTESTC00105000",
-            "O:XYZTESTC00100000",
         ])
         self.assertTrue(all(candidate.status == "OK" for candidate in candidates))
-        self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
         self.assertGreater(candidates[0].volume, candidates[1].volume)
-        self.assertIn("high-volume/high-OI option-chain liquidity", candidates[0].reason)
+        self.assertLess(candidates[0].open_interest, candidates[1].open_interest)
+        self.assertIn("exceptional same-day volume", candidates[0].reason)
 
     def test_recommend_option_contracts_prefers_liquidity_over_atm_score(self):
         chain = [
@@ -250,6 +250,42 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual([candidate.contract_symbol for candidate in candidates], ["O:XYZTESTC00105000"])
         self.assertGreaterEqual(candidates[0].volume, 1000)
         self.assertGreaterEqual(candidates[0].open_interest, 5000)
+
+
+
+    def test_exceptional_volume_contract_can_override_short_dte_and_low_oi(self):
+        chain = [
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.4, "ask": 2.6},
+                "day": {"volume": 5000},
+                "open_interest": 12000,
+                "greeks": {"delta": 0.47},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 1.4, "ask": 1.5},
+                "day": {"volume": 20000},
+                "open_interest": 100,
+                "greeks": {"delta": 0.25},
+                "implied_volatility": 0.5,
+            },
+        ]
+
+        with patch("options_engine.MIN_DTE", 27000), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 101},
+                top_n=2,
+            )
+
+        self.assertEqual([candidate.contract_symbol for candidate in candidates], ["O:XYZTESTC00110000"])
+        self.assertEqual(candidates[0].volume, 20000)
+        self.assertEqual(candidates[0].open_interest, 100)
+        self.assertIn("near-term expiry", candidates[0].reason)
+        self.assertIn("stale/low OI", candidates[0].reason)
 
 
     def test_recommend_option_contracts_prefers_liquid_contract_even_when_delta_outside_target(self):

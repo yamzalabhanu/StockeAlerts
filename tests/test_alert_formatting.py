@@ -51,6 +51,14 @@ class AlertFormattingTests(unittest.TestCase):
         self.assertIn("Est. Contract Move", block)
         self.assertIn("delta-only", block)
 
+    def test_recommended_option_contract_omits_skip_blocks(self):
+        block = format_recommended_option_contract({
+            "status": "SKIP",
+            "reason": "No option passed filters",
+        })
+
+        self.assertEqual(block, "")
+
 
 if __name__ == "__main__":
     unittest.main()

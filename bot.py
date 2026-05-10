@@ -416,16 +416,19 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     ranking_score -= 15
                 if options_flow.gamma_squeeze and best.get("direction") == "CALL":
                     ranking_score += 15
+        except Exception as e:
+            print(f"{ticker}: options flow analysis skipped: {e}")
 
+        try:
             option_contract = select_option_contract(
                 ticker,
-                {"signal": best.get("direction"), "price": tech.get("price")},
+                {"signal": best.get("direction"), "price": ai.get("entry") or tech.get("price")},
             )
             best["option_contract"] = option_to_dict(option_contract)
             if option_contract.status == "OK":
                 ranking_score += min(10, (option_contract.recommendation_score or 0) * 0.08)
         except Exception as e:
-            print(f"{ticker}: options flow/contract selection skipped: {e}")
+            print(f"{ticker}: option contract selection skipped: {e}")
 
         return {
             "ticker": ticker,
@@ -495,6 +498,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     direction=direction,
                     entry=ai.get("entry"),
                     target=ai.get("target"),
+                    include_skip_reason=True,
                 )
             else:
                 option_contract_text = format_recommended_option_contract(
@@ -502,6 +506,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     direction=direction,
                     entry=ai.get("entry"),
                     target=ai.get("target"),
+                    include_skip_reason=True,
                 )
 
         msg = (

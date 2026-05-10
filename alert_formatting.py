@@ -92,6 +92,7 @@ def format_recommended_option_contract(
     direction: str = "",
     entry: Any = None,
     target: Any = None,
+    include_skip_reason: bool = False,
 ) -> str:
     """Format a detailed recommended options contract block for Telegram alerts."""
     if not option_contract:
@@ -101,7 +102,11 @@ def format_recommended_option_contract(
         option_contract = getattr(option_contract, "__dict__", {})
 
     if option_contract.get("status") != "OK":
-        return ""
+        if not include_skip_reason:
+            return ""
+        reason = option_contract.get("reason") or "No eligible contract returned"
+        status = option_contract.get("status") or "SKIP"
+        return f"\n⚠️ Option Recommendation: {status} — {reason}\n"
 
     lines = [
         f"\n🎯 Recommended Contract: {option_contract.get('contract_symbol')}",

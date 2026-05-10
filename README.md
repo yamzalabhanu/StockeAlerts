@@ -73,9 +73,9 @@ Telegram alerts are now sent through a safe HTML formatting path instead of rely
 
 ---
 
-### 📌 Auto Watchlist + Daily Mover Discovery
+### 📌 Auto Watchlist + Extended-Hours / Options Discovery
 
-The scanner can now merge the static watchlist with active Polygon daily movers. When `USE_AUTO_WATCHLIST` is enabled, the bot pulls U.S. equity snapshots, filters by minimum price, volume, and absolute daily change, ranks movers by activity, and adds the highest-priority names to the scan universe.
+The scanner can now merge the static watchlist with active Polygon daily movers, extended-hours movers, and option-activity names. When `USE_AUTO_WATCHLIST` is enabled, the bot pulls U.S. equity snapshots or historical grouped aggregates, checks Polygon minute bars for pre-market/after-hours volume and percentage movement, adds Polygon option snapshot volume/OI context, ranks candidates by combined stock/extended-hours/options activity, and adds the highest-priority names to the scan universe for intraday scalping and swing alerts.
 
 Key controls include:
 
@@ -83,9 +83,17 @@ Key controls include:
 |---|---|
 | `USE_AUTO_WATCHLIST` | Enable/disable automatic mover discovery |
 | `AUTO_WATCHLIST_LIMIT` | Maximum number of mover symbols to append |
-| `MIN_AUTO_VOLUME` | Minimum same-day volume for auto-added names |
-| `MIN_AUTO_CHANGE_PCT` | Minimum absolute percentage move |
+| `MIN_AUTO_VOLUME` | Minimum same-day stock volume for daily-mover qualification |
+| `MIN_AUTO_CHANGE_PCT` | Minimum absolute regular-session percentage move |
 | `MIN_STOCK_PRICE` | Low-price filter for mover candidates |
+| `AUTO_WATCHLIST_USE_EXTENDED_HOURS` | Enable Polygon minute-aggregate pre-market/after-hours scoring |
+| `AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT` | Number of top stock candidates to enrich with extended-hours bars |
+| `MIN_EXTENDED_HOURS_VOLUME` | Minimum pre-market or after-hours volume for extended-hours qualification |
+| `MIN_EXTENDED_HOURS_CHANGE_PCT` | Minimum pre-market or after-hours percentage move versus previous close |
+| `AUTO_WATCHLIST_USE_OPTIONS` | Enable Polygon option snapshot volume/OI scoring |
+| `AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT` | Number of top stock candidates to enrich with option snapshots |
+| `MIN_AUTO_OPTION_VOLUME` | Minimum summed option volume for options-activity qualification |
+| `MIN_AUTO_OPTION_OPEN_INTEREST` | Minimum summed option open interest for options-activity qualification |
 
 The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers.
 

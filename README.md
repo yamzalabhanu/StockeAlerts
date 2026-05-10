@@ -241,7 +241,7 @@ A setup is approved only when the SMC score is strong enough and structure align
 
 ### 📈 Options Contract Selection + Theta Control
 
-Options support has been expanded with a Polygon snapshot-based selector that can identify liquid near-the-money contracts.
+Options support has been expanded with a Polygon snapshot-based selector that can identify liquid near-the-money contracts while requiring high same-day volume and high open interest for every recommendation.
 
 The options layer evaluates:
 
@@ -252,12 +252,12 @@ The options layer evaluates:
 - Delta
 - Theta
 - Implied volatility
-- Volume and open interest
+- High same-day volume and high open interest
 - Volume/OI participation ratio
 - OI/volume-weighted recommendation score
 - Estimated option dollar volume
 
-The selector now uses the same Polygon/Massive-compatible snapshot client as the options-flow engine. When a directional intraday or swing setup passes, the bot can attach an `Option Pick` that prioritizes contracts with strong same-day volume, high open interest, acceptable spreads, target delta, and nearby strikes instead of simply choosing the closest ATM contract.
+The selector now uses the same Polygon/Massive-compatible snapshot client as the options-flow engine. When a directional intraday or swing setup passes, the bot can attach an `Option Pick` that only considers contracts meeting the configured high-volume and high-open-interest floors, then prioritizes the strongest same-day volume, open interest, acceptable spreads, target delta, and nearby strikes instead of simply choosing the closest ATM contract.
 
 The true options flow and liquidity engine can also use Polygon/Massive-compatible options APIs to score explosive intraday and swing conditions:
 
@@ -795,8 +795,8 @@ OPTIONS_DELTA_IMBALANCE_RATIO=1.75
 OPTIONS_GAMMA_SQUEEZE_MIN_SCORE=70
 
 # Optional contract-selection tuning
-MIN_OPTION_VOLUME=100
-MIN_OPTION_OI=250
+MIN_OPTION_VOLUME=1000
+MIN_OPTION_OI=5000
 MAX_OPTION_SPREAD_PCT=12
 MAX_OPTION_IV=1.20
 TARGET_MIN_DELTA=0.35

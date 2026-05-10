@@ -13,8 +13,8 @@ MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") or POLYGON_API_KEY
 OPTIONS_API_KEY = os.getenv("OPTIONS_API_KEY") or MASSIVE_API_KEY
 OPTIONS_API_BASE_URL = os.getenv("OPTIONS_API_BASE_URL", "https://api.polygon.io").rstrip("/")
 
-MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "100"))
-MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "250"))
+MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "1000"))
+MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "5000"))
 MAX_SPREAD_PCT = float(os.getenv("MAX_OPTION_SPREAD_PCT", "12"))
 MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
 TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
@@ -740,7 +740,7 @@ def _candidate_from_chain_item(
         open_interest=oi,
         status="OK",
         reason=(
-            "Recommended from option-chain liquidity: "
+            "Recommended from high-volume/high-OI option-chain liquidity: "
             f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
             f"{distance_pct * 100:.1f}% from spot."
         ),
@@ -773,6 +773,7 @@ def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
         -(candidate.spread_pct or MAX_SPREAD_PCT),
     )
 
+
 def recommend_option_contracts_from_chain(
     symbol: str,
     option_chain: list[dict[str, Any]],
@@ -783,9 +784,10 @@ def recommend_option_contracts_from_chain(
     """Rank option-chain snapshots by high volume, OI, and tradable liquidity.
 
     This helper is useful when an option chain has already been fetched by another
-    provider or test fixture. It applies the same spread, IV, DTE, volume, and OI
-    guardrails as the live selector, treats delta as a quality score rather than a
-    hard rejection, then returns the highest-liquidity contracts.
+    provider or test fixture. It applies the same spread, IV, DTE, high-volume,
+    and high-OI guardrails as the live selector, treats delta as a quality score
+    rather than a hard rejection, then returns only the highest-liquidity
+    contracts.
     """
     option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
     price = _safe_float(analysis.get("price"))
@@ -809,10 +811,10 @@ def select_option_contract(
 ) -> OptionCandidate:
     """Recommend the best directional option contract using Polygon/Massive snapshots.
 
-    The selector enforces spread, IV, DTE, volume, and OI guardrails while treating
-    delta as a quality score. Ranking prioritizes same-day option volume first and
-    open interest second so alerts recommend contracts traders can realistically
-    enter and exit.
+    The selector enforces spread, IV, DTE, high-volume, and high-OI guardrails
+    while treating delta as a quality score. Ranking prioritizes same-day option
+    volume first and open interest second so alerts only recommend contracts
+    traders can realistically enter and exit.
     """
     option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
     if not option_type:
@@ -921,7 +923,7 @@ def select_option_contract(
                 open_interest=oi,
                 status="OK",
                 reason=(
-                    "Recommended by Polygon/Massive snapshot liquidity: "
+                    "Recommended by high-volume/high-OI Polygon/Massive snapshot liquidity: "
                     f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
                     f"{distance_pct * 100:.1f}% from spot."
                 ),
@@ -944,7 +946,7 @@ def select_option_contract(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed OI/volume, spread, DTE, and IV filters{suffix}",
+        f"No option passed high-volume/high-OI, spread, DTE, and IV filters{suffix}",
     )
 
 

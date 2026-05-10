@@ -59,6 +59,18 @@ class AlertFormattingTests(unittest.TestCase):
 
         self.assertEqual(block, "")
 
+    def test_recommended_option_contract_can_include_skip_reason_for_alerts(self):
+        block = format_recommended_option_contract(
+            {
+                "status": "SKIP",
+                "reason": "No option passed filters",
+            },
+            include_skip_reason=True,
+        )
+
+        self.assertIn("Option Recommendation: SKIP", block)
+        self.assertIn("No option passed filters", block)
+
 
 if __name__ == "__main__":
     unittest.main()

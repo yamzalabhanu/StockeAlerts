@@ -55,7 +55,7 @@ class FakeSelectionClient:
             {
                 "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
                 "last_quote": {"bid": 4.9, "ask": 5.1},
-                "day": {"volume": 900},
+                "day": {"volume": 1200},
                 "open_interest": 5000,
                 "greeks": {"delta": 0.52, "gamma": 0.04, "theta": -0.08},
                 "implied_volatility": 0.58,
@@ -138,7 +138,7 @@ class OptionsFlowTests(unittest.TestCase):
             {
                 "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": "2099-01-15"},
                 "last_quote": {"bid": 4.9, "ask": 5.1},
-                "day": {"volume": 900},
+                "day": {"volume": 1200},
                 "open_interest": 5000,
                 "greeks": {"delta": 0.52, "gamma": 0.04, "theta": -0.08},
                 "implied_volatility": 0.58,
@@ -176,7 +176,7 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertTrue(all(candidate.status == "OK" for candidate in candidates))
         self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
         self.assertGreater(candidates[0].volume, candidates[1].volume)
-        self.assertIn("option-chain liquidity", candidates[0].reason)
+        self.assertIn("high-volume/high-OI option-chain liquidity", candidates[0].reason)
 
     def test_recommend_option_contracts_prefers_liquidity_over_atm_score(self):
         chain = [
@@ -211,14 +211,22 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
         self.assertGreater(candidates[1].recommendation_score, candidates[0].recommendation_score)
 
-    def test_recommend_option_contracts_never_penalizes_higher_volume_and_oi_for_lower_turnover(self):
+    def test_recommend_option_contracts_require_high_volume_and_high_oi(self):
         chain = [
             {
                 "details": {"ticker": "O:XYZTESTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": "2099-01-15"},
                 "last_quote": {"bid": 2.95, "ask": 3.05},
                 "day": {"volume": 900},
-                "open_interest": 900,
+                "open_interest": 20000,
                 "greeks": {"delta": 0.5},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00102500", "contract_type": "call", "strike_price": 102.5, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.6, "ask": 2.8},
+                "day": {"volume": 5000},
+                "open_interest": 4999,
+                "greeks": {"delta": 0.48},
                 "implied_volatility": 0.5,
             },
             {
@@ -236,13 +244,12 @@ class OptionsFlowTests(unittest.TestCase):
                 "XYZ",
                 chain,
                 {"signal": "CALL", "price": 100},
-                top_n=2,
+                top_n=3,
             )
 
-        self.assertEqual(candidates[0].contract_symbol, "O:XYZTESTC00105000")
-        self.assertGreater(candidates[0].volume, candidates[1].volume)
-        self.assertGreater(candidates[0].open_interest, candidates[1].open_interest)
-        self.assertGreater(candidates[1].volume_oi_ratio, candidates[0].volume_oi_ratio)
+        self.assertEqual([candidate.contract_symbol for candidate in candidates], ["O:XYZTESTC00105000"])
+        self.assertGreaterEqual(candidates[0].volume, 1000)
+        self.assertGreaterEqual(candidates[0].open_interest, 5000)
 
 
     def test_recommend_option_contracts_prefers_liquid_contract_even_when_delta_outside_target(self):

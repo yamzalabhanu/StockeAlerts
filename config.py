@@ -13,7 +13,7 @@ ENABLE_INTRADAY_ALERTS = True
 ENABLE_SWING_ALERTS = True
 
 INTRADAY_MIN_SCORE = 85
-SWING_MIN_SCORE = 85
+SWING_MIN_SCORE = 100
 SWING_MIN_REASONS = 4
 SWING_A_PLUS_SCORE = 90
 SWING_A_SCORE = 85
@@ -73,11 +73,69 @@ SPEC_WATCHLIST = [
     "ARKK",
 ]
 
+MASTER_WATCHLIST = [
+    "SPY","QQQ","IWM","DIA","SMH","SOXX","XLK","XLF","XLE","XBI",
+    "TQQQ","SQQQ","UVXY","VXX","SPXL","SPXS","SOXL","SOXS",
+    "LABU","LABD","FNGU","FNGD","ARKK","ARKG","ARKF","ARKQ",
+    "XLV","XLI","XLY","XLP","IYR","KRE","GDX","SLV","GLD",
+    "USO","BITO","IBIT","HYG","TLT",
+
+    # Mega Cap / AI / Semis
+    "NVDA","AMD","AVGO","TSM","MU","MRVL","QCOM","AMAT","LRCX",
+    "KLAC","ASML","ADI","TXN","NXPI","MCHP","MPWR","ON","CRDO",
+    "ALAB","AEHR","COHR","FORM","ONTO","TER","APH","CIEN",
+    "ANET","DELL","HPE","PSTG","WDC","STX","SNDK","INTC",
+
+    # Big Tech
+    "AAPL","MSFT","META","AMZN","GOOGL","TSLA","NFLX","ORCL",
+    "CRM","NOW","ADBE","PANW","CRWD","MDB","NET","DDOG",
+    "SNOW","ZS","FTNT","SHOP","TEAM","WDAY","INTU","SNPS",
+    "CDNS","PATH","GTLB","ESTC","APP","DUOL",
+
+    # AI / Momentum
+    "PLTR","SMCI","AI","BBAI","SOUN","IONQ","QBTS","QUBT",
+    "RGTI","ARQQ","RKLB","ASTS","LUNR","ACHR","JOBY","SPCE",
+
+    # Crypto / High Beta
+    "COIN","MSTR","MARA","RIOT","CLSK","IREN","CIFR","BTDR",
+    "HOOD","SOFI","AFRM","UPST","PYPL","SQ","IBKR","SCHW",
+
+    # EV / Auto
+    "RIVN","LCID","NIO","LI","XPEV","F","GM","TSLA",
+
+    # Financials
+    "JPM","BAC","WFC","GS","MS","C","AXP","V","MA",
+
+    # Healthcare / Biotech
+    "LLY","UNH","JNJ","MRK","ABBV","PFE","TMO","ISRG",
+    "VRTX","REGN","MRNA","BNTX","BIIB","AXSM","VKTX","ALT",
+    "TEM","SMMT","CGON","ALNY","BEAM","CRSP","EDIT","NTLA",
+    "RXRX","EXAS","ILMN","DNA","PACB","TXG",
+
+    # Energy / Materials
+    "XOM","CVX","OXY","SLB","COP","HAL","FCX","NEM","CLF",
+
+    # Aerospace / Industrial
+    "BA","LMT","RTX","NOC","GE","CAT","DE",
+
+    # Retail / Consumer
+    "WMT","COST","HD","LOW","MCD","SBUX","NKE","TGT",
+    "CAVA","HIMS","CELH",
+
+    # Travel / Airlines
+    "UAL","DAL","AAL","LUV","RCL","CCL","NCLH",
+    "BKNG","EXPE","ABNB","MAR","HLT",
+
+    # Additional Active Movers
+    "AAOI","LITE","FSLR","RUN","ENPH","SEDG","DKNG","PENN",
+    "ROKU","SNAP","PINS","UBER", "RKLB"
+]
 # Static universe used as the base scan list.
 BASE_WATCHLIST = list(dict.fromkeys(
     CORE_WATCHLIST +
     SECONDARY_WATCHLIST +
-    SPEC_WATCHLIST
+    SPEC_WATCHLIST +
+    MASTER_WATCHLIST
 ))
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---

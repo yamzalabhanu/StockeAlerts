@@ -101,8 +101,7 @@ def format_recommended_option_contract(
         option_contract = getattr(option_contract, "__dict__", {})
 
     if option_contract.get("status") != "OK":
-        reason = option_contract.get("reason", "No contract passed filters")
-        return f"\n🎯 Recommended Contract: SKIP - {reason}\n"
+        return ""
 
     lines = [
         f"\n🎯 Recommended Contract: {option_contract.get('contract_symbol')}",

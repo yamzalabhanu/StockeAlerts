@@ -706,9 +706,9 @@ def _candidate_from_chain_item(
         return None, "oi"
     if iv is not None and _safe_float(iv) > MAX_IV:
         return None, "iv"
-    if delta is not None and not (TARGET_MIN_DELTA <= abs(_safe_float(delta)) <= TARGET_MAX_DELTA):
-        return None, "delta"
-
+    # Delta is a quality input, not a hard liquidity filter.  Keep high-volume/high-OI
+    # contracts eligible so alerts do not recommend a thinner contract solely because
+    # the liquid contract is slightly outside the target delta band.
     score, liquidity_score, volume_oi_ratio, distance_pct = _score_option_candidate(
         strike=strike,
         price=price,
@@ -756,18 +756,17 @@ def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
     """Rank candidates by raw volume and OI first, then quality tie-breakers.
 
     The alert should not choose a thinner contract when another eligible contract
-    has both higher same-day volume and higher open interest.  A volume*OI
-    liquidity product makes that Pareto-dominant contract rank higher even when
-    the thinner contract has a better ATM/delta score or a higher volume/OI
-    turnover ratio.
+    has better same-day participation. Same-day volume is the first sort key, OI
+    is the second, and score/spread are only tie-breakers so ATM/delta quality
+    cannot make a lower-volume contract win ahead of a more active strike.
     """
     volume = candidate.volume or 0
     oi = candidate.open_interest or 0
     raw_liquidity = volume * oi
     return (
-        raw_liquidity,
         volume,
         oi,
+        raw_liquidity,
         candidate.dollar_volume or 0.0,
         candidate.liquidity_score or 0.0,
         candidate.recommendation_score or 0.0,
@@ -784,9 +783,9 @@ def recommend_option_contracts_from_chain(
     """Rank option-chain snapshots by high volume, OI, and tradable liquidity.
 
     This helper is useful when an option chain has already been fetched by another
-    provider or test fixture. It applies the same spread, IV, delta, DTE, volume,
-    and OI guardrails as the live selector, then returns the highest-scoring
-    contracts with the strongest same-day volume and open interest profile.
+    provider or test fixture. It applies the same spread, IV, DTE, volume, and OI
+    guardrails as the live selector, treats delta as a quality score rather than a
+    hard rejection, then returns the highest-liquidity contracts.
     """
     option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
     price = _safe_float(analysis.get("price"))
@@ -810,10 +809,10 @@ def select_option_contract(
 ) -> OptionCandidate:
     """Recommend the best directional option contract using Polygon/Massive snapshots.
 
-    The selector still enforces spread, IV, delta, DTE, volume, and OI guardrails, but
-    the ranking now emphasizes contracts with strong open interest, same-day volume,
-    and healthy volume/OI participation so alerts recommend a contract traders can
-    realistically enter and exit.
+    The selector enforces spread, IV, DTE, volume, and OI guardrails while treating
+    delta as a quality score. Ranking prioritizes same-day option volume first and
+    open interest second so alerts recommend contracts traders can realistically
+    enter and exit.
     """
     option_type = _option_side_from_signal(analysis.get("signal", "") or analysis.get("direction", ""))
     if not option_type:
@@ -830,7 +829,7 @@ def select_option_contract(
     expiries = _next_fridays()
     best: Optional[OptionCandidate] = None
     best_rank: tuple[float, ...] = (-1.0,)
-    rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "delta": 0, "dte": 0}
+    rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0}
 
     for expiry in expiries:
         try:
@@ -888,10 +887,9 @@ def select_option_contract(
             if iv is not None and _safe_float(iv) > MAX_IV:
                 rejection_counts["iv"] += 1
                 continue
-            if delta is not None and not (TARGET_MIN_DELTA <= abs(_safe_float(delta)) <= TARGET_MAX_DELTA):
-                rejection_counts["delta"] += 1
-                continue
-
+            # Delta is scored below, but it should not hide the most liquid contract.
+            # Traders complained when lower volume/OI contracts won only because the
+            # higher-liquidity strike sat outside the preferred delta band.
             score, liquidity_score, volume_oi_ratio, distance_pct = _score_option_candidate(
                 strike=strike,
                 price=price,
@@ -946,7 +944,7 @@ def select_option_contract(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed OI/volume, spread, delta, DTE, and IV filters{suffix}",
+        f"No option passed OI/volume, spread, DTE, and IV filters{suffix}",
     )
 
 

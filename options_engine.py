@@ -21,6 +21,8 @@ TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
 TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
 MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "45"))
+HIGH_VOLUME_OPTION_MIN_VOLUME = int(os.getenv("HIGH_VOLUME_OPTION_MIN_VOLUME", str(MIN_OPTION_VOLUME * 10)))
+HIGH_VOLUME_OPTION_MIN_DTE = int(os.getenv("HIGH_VOLUME_OPTION_MIN_DTE", "0"))
 
 FLOW_EXPIRY_DAYS = int(os.getenv("OPTIONS_FLOW_EXPIRY_DAYS", "45"))
 FLOW_TOP_CONTRACTS = int(os.getenv("OPTIONS_FLOW_TOP_CONTRACTS", "24"))
@@ -204,6 +206,35 @@ def _contract_notional(item: dict[str, Any]) -> float:
     volume = _snapshot_volume(item)
     mid = _mid_from_snapshot(item) or _safe_float(day.get("vwap"))
     return volume * mid * 100 if mid else 0.0
+
+
+def _is_exceptional_volume(volume: int) -> bool:
+    """Return True when same-day contract volume is high enough to override stale OI/short-DTE filters."""
+    return volume >= max(MIN_OPTION_VOLUME, HIGH_VOLUME_OPTION_MIN_VOLUME)
+
+
+def _passes_dte_filter(dte: int, volume: int) -> bool:
+    if MIN_DTE <= dte <= MAX_DTE:
+        return True
+    return _is_exceptional_volume(volume) and HIGH_VOLUME_OPTION_MIN_DTE <= dte <= MAX_DTE
+
+
+def _passes_oi_filter(volume: int, oi: int) -> bool:
+    return oi >= MIN_OPTION_OI or _is_exceptional_volume(volume)
+
+
+def _option_recommendation_reason(oi: int, volume: int, volume_oi_ratio: float, distance_pct: float, dte: int) -> str:
+    qualifiers = []
+    if _is_exceptional_volume(volume) and oi < MIN_OPTION_OI:
+        qualifiers.append("exceptional same-day volume overrode stale/low OI")
+    if _is_exceptional_volume(volume) and dte < MIN_DTE:
+        qualifiers.append("exceptional same-day volume allowed near-term expiry")
+    qualifier_text = f" ({'; '.join(qualifiers)})" if qualifiers else ""
+    return (
+        "Recommended by high-volume/high-OI option-chain liquidity"
+        f"{qualifier_text}: OI {oi:,}, volume {volume:,}, "
+        f"volume/OI {volume_oi_ratio:.2f}, {distance_pct * 100:.1f}% from spot."
+    )
 
 
 def _expiry_within(details: dict[str, Any], max_days: int) -> bool:
@@ -678,8 +709,6 @@ def _candidate_from_chain_item(
         dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
     except ValueError:
         return None, "dte"
-    if dte < MIN_DTE or dte > MAX_DTE:
-        return None, "dte"
 
     quote = item.get("last_quote", {}) or {}
     bid = quote.get("bid")
@@ -698,11 +727,13 @@ def _candidate_from_chain_item(
     volume = _snapshot_volume(item)
     oi = _snapshot_open_interest(item)
 
+    if not _passes_dte_filter(dte, volume):
+        return None, "dte"
     if spread is not None and spread > MAX_SPREAD_PCT:
         return None, "spread"
     if volume < MIN_OPTION_VOLUME:
         return None, "volume"
-    if oi < MIN_OPTION_OI:
+    if not _passes_oi_filter(volume, oi):
         return None, "oi"
     if iv is not None and _safe_float(iv) > MAX_IV:
         return None, "iv"
@@ -739,11 +770,7 @@ def _candidate_from_chain_item(
         volume=volume,
         open_interest=oi,
         status="OK",
-        reason=(
-            "Recommended from high-volume/high-OI option-chain liquidity: "
-            f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
-            f"{distance_pct * 100:.1f}% from spot."
-        ),
+        reason=_option_recommendation_reason(oi, volume, volume_oi_ratio, distance_pct, dte),
         recommendation_score=round(score, 2),
         liquidity_score=round(liquidity_score, 2),
         volume_oi_ratio=round(volume_oi_ratio, 3),
@@ -828,7 +855,7 @@ def select_option_contract(
     if price <= 0:
         return _empty_option_candidate(symbol, option_type, "SKIP", "Underlying price missing for option recommendation")
 
-    expiries = _next_fridays()
+    expiries = _next_fridays(min_dte=min(MIN_DTE, HIGH_VOLUME_OPTION_MIN_DTE), max_dte=MAX_DTE)
     best: Optional[OptionCandidate] = None
     best_rank: tuple[float, ...] = (-1.0,)
     rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0}
@@ -856,9 +883,6 @@ def select_option_contract(
                 dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
             except ValueError:
                 dte = (datetime.fromisoformat(expiry).date() - datetime.now(timezone.utc).date()).days
-            if dte < MIN_DTE or dte > MAX_DTE:
-                rejection_counts["dte"] += 1
-                continue
 
             quote = item.get("last_quote", {}) or {}
             bid = quote.get("bid")
@@ -877,13 +901,16 @@ def select_option_contract(
             volume = _snapshot_volume(item)
             oi = _snapshot_open_interest(item)
 
+            if not _passes_dte_filter(dte, volume):
+                rejection_counts["dte"] += 1
+                continue
             if spread is not None and spread > MAX_SPREAD_PCT:
                 rejection_counts["spread"] += 1
                 continue
             if volume < MIN_OPTION_VOLUME:
                 rejection_counts["volume"] += 1
                 continue
-            if oi < MIN_OPTION_OI:
+            if not _passes_oi_filter(volume, oi):
                 rejection_counts["oi"] += 1
                 continue
             if iv is not None and _safe_float(iv) > MAX_IV:
@@ -922,11 +949,7 @@ def select_option_contract(
                 volume=volume,
                 open_interest=oi,
                 status="OK",
-                reason=(
-                    "Recommended by high-volume/high-OI Polygon/Massive snapshot liquidity: "
-                    f"OI {oi:,}, volume {volume:,}, volume/OI {volume_oi_ratio:.2f}, "
-                    f"{distance_pct * 100:.1f}% from spot."
-                ),
+                reason=_option_recommendation_reason(oi, volume, volume_oi_ratio, distance_pct, dte),
                 recommendation_score=round(score, 2),
                 liquidity_score=round(liquidity_score, 2),
                 volume_oi_ratio=round(volume_oi_ratio, 3),

@@ -57,6 +57,8 @@ playwright install chromium
 
 The options selector now ranks contracts by actionable liquidity before simple moneyness convenience. It scans Polygon/Massive-compatible option snapshots, applies DTE, spread, IV, delta, volume, and open-interest guardrails, then prioritizes contracts with the strongest same-day volume, open interest, volume/OI participation, dollar volume, and recommendation score.
 
+Exceptional same-day option volume can also override stale/low open interest and include near-term expirations, so alerts can recommend unusually active strikes such as a high-volume weekly call instead of a thinner contract. Tune this with `HIGH_VOLUME_OPTION_MIN_VOLUME` and `HIGH_VOLUME_OPTION_MIN_DTE`.
+
 Telegram alerts can include a detailed recommended-contract block with contract symbol, side, strike, expiration, DTE, bid/ask/mid, spread percentage, volume/OI, recommendation score, delta, theta, IV, and an estimated delta-only contract move if the underlying reaches target.
 
 ---

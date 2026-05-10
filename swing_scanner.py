@@ -745,6 +745,7 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
             direction=setup.get("direction", ""),
             entry=setup.get("entry"),
             target=setup.get("target"),
+            include_skip_reason=True,
         ).lstrip("\n")
 
     return (

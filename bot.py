@@ -22,6 +22,7 @@ from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
 from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
+from alert_history import mark_alerted_today, was_alerted_today
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -309,6 +310,10 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         return False, ai.get("reason", "AI did not approve")
 
     async def build_candidate(self, ticker):
+        if was_alerted_today(ticker):
+            print(f"{ticker}: skipped, alert already sent today")
+            return None
+
         tech = self.get_technical_context(ticker)
         if not tech:
             return None
@@ -544,6 +549,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         )
 
         self.send_telegram_msg(msg)
+
+        mark_alerted_today(ticker)
 
         log_alert({
             "timestamp": alert_time,

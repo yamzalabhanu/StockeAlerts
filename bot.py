@@ -232,7 +232,7 @@ Return ONLY valid JSON:
 
         try:
             r = ai_client.chat.completions.create(
-                **chat_completion_options(temperature=0.1),
+                **chat_completion_options(setup=setup, temperature=0.1),
                 messages=[
                     {
                         "role": "system",
@@ -272,7 +272,7 @@ Intraday Confirmation: {intraday_info}
 Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_reward, setup_quality, entry_timing, retest_confirmed, late_breakout_risk, reason.
 """
             response = ai_client.chat.completions.create(
-                **chat_completion_options(temperature=0.1),
+                **chat_completion_options(setup=setup, temperature=0.1),
                 messages=[
                     {"role": "system", "content": "Use the chart to confirm structure. Reject chop, fakeouts, and late extensions."},
                     {

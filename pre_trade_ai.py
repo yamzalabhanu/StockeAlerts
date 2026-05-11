@@ -7,6 +7,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def pre_trade_filter(symbol: str, analysis: dict, option: dict) -> str:
     """Final AI gate before sending alert to improve win rate."""
+    model_context = {**(option or {}), **(analysis or {})}
     prompt = f"""
 You are a strict trading filter.
 
@@ -30,6 +31,7 @@ Reason: one short sentence
 
     response = client.chat.completions.create(
         **chat_completion_options(
+            setup=model_context,
             messages=[{"role": "user", "content": prompt}],
         ),
     )

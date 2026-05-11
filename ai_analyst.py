@@ -25,6 +25,7 @@ def ai_decision(symbol, analysis):
 
     response = client.chat.completions.create(
         **chat_completion_options(
+            setup=analysis,
             messages=[{"role": "user", "content": prompt}]
         )
     )

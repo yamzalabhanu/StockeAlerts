@@ -292,7 +292,10 @@ FAILED_BREAKOUT_WEIGHT = 30
 SR_REJECTION_WEIGHT = 25
 
 RANK_TOP_ALERTS_ONLY = True
+# Hard cap for high-quality setup alerts sent during one scan.
+# Intraday and swing candidates are ranked together so only the best setups fire.
 MAX_ALERTS_PER_SCAN = 5
+MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
 QUALITY_WINDOWS = [
     ("09:30", "14:30"),

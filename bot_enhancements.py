@@ -18,6 +18,27 @@ def learn_from_outcomes(results):
     return train_from_rows(results)
 
 
+def high_quality_alert_cap():
+    """Return the per-scan hard cap for ranked high-quality alerts."""
+    configured_cap = max(0, int(MAX_HIGH_QUALITY_ALERTS_PER_SCAN))
+    hard_cap = max(0, int(MAX_ALERTS_PER_SCAN))
+    return min(configured_cap, hard_cap)
+
+
+def select_top_high_quality_alerts(alert_pool):
+    """Rank all completed watchlist candidates and return only the top alerts.
+
+    The scanner should finish evaluating every ticker before this selection runs,
+    then send no more than the configured top-five high-quality setups.
+    """
+    ranked_alerts = sorted(
+        alert_pool,
+        key=lambda x: x.get("ranking_score", 0),
+        reverse=True,
+    )
+    return ranked_alerts[:high_quality_alert_cap()]
+
+
 def apply_enhancements(bot_cls):
     if hasattr(bot_cls, _ORIGINAL_BUILD_CANDIDATE_ATTR):
         return bot_cls
@@ -140,9 +161,8 @@ def apply_enhancements(bot_cls):
                 if ENABLE_SWING_ALERTS:
                     alert_pool.extend({"alert_type": "SWING", **c} for c in swing_candidates)
 
-                alert_pool.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
-                scan_alert_cap = max(0, int(MAX_HIGH_QUALITY_ALERTS_PER_SCAN))
-                selected = alert_pool[:scan_alert_cap]
+                selected = select_top_high_quality_alerts(alert_pool)
+                scan_alert_cap = high_quality_alert_cap()
 
                 sent = 0
                 swing_sent = 0

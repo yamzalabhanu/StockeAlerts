@@ -1,6 +1,11 @@
 import unittest
 
-from openai_models import chat_completion_options, is_reasoning_model
+from openai_models import (
+    chat_completion_options,
+    is_high_quality_setup,
+    is_reasoning_model,
+    market_reasoning_model,
+)
 
 
 class OpenAIModelConfigTests(unittest.TestCase):
@@ -24,6 +29,26 @@ class OpenAIModelConfigTests(unittest.TestCase):
         self.assertEqual(options["temperature"], 0.1)
         self.assertNotIn("reasoning_effort", options)
         self.assertFalse(is_reasoning_model(options["model"]))
+
+    def test_scan_defaults_to_gpt_5_3(self):
+        options = chat_completion_options(setup={"score": 84}, temperature=0.1)
+
+        self.assertEqual(options["model"], "gpt-5.3")
+        self.assertEqual(market_reasoning_model({"score": 94.99}), "gpt-5.3")
+        self.assertNotIn("temperature", options)
+
+    def test_score_95_promotes_to_gpt_5_5(self):
+        options = chat_completion_options(setup={"score": 95}, temperature=0.1)
+
+        self.assertTrue(is_high_quality_setup({"score": 95}))
+        self.assertEqual(options["model"], "gpt-5.5")
+        self.assertNotIn("temperature", options)
+
+    def test_a_plus_promotes_to_gpt_5_5(self):
+        options = chat_completion_options(setup={"decision": "A+", "final_score": 91})
+
+        self.assertTrue(is_high_quality_setup({"decision": "A+", "final_score": 91}))
+        self.assertEqual(options["model"], "gpt-5.5")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ Return ONLY a number.
     try:
         res = client.chat.completions.create(
             **chat_completion_options(
+                setup=setup,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}],
             )

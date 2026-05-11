@@ -162,7 +162,7 @@ class ChartVisionTests(unittest.TestCase):
         kwargs = client.chat.completions.kwargs
         self.assertEqual(reading["decision"], "WAIT")
         self.assertEqual(kwargs["model"], DEFAULT_VISION_MODEL)
-        self.assertEqual(DEFAULT_VISION_MODEL, "gpt-5.3")
+        self.assertEqual(DEFAULT_VISION_MODEL, "gpt-5-mini")
         self.assertEqual(kwargs["response_format"]["type"], "json_schema")
         self.assertEqual(kwargs["reasoning_effort"], "medium")
         self.assertNotIn("temperature", kwargs)

@@ -25,18 +25,36 @@ def high_quality_alert_cap():
     return min(configured_cap, hard_cap)
 
 
-def select_top_high_quality_alerts(alert_pool):
-    """Rank all completed watchlist candidates and return only the top alerts.
+def _candidate_ticker(candidate):
+    return str(candidate.get("ticker", "")).upper()
 
-    The scanner should finish evaluating every ticker before this selection runs,
-    then send no more than the configured top-five high-quality setups.
+
+def is_etf_alert(candidate):
+    """Return True when a ranked alert candidate is one of the tracked ETFs."""
+    return _candidate_ticker(candidate) in set(ETF_ALERT_SYMBOLS)
+
+
+def select_top_high_quality_alerts(alert_pool):
+    """Rank a completed scan and return the best ETF and stock alerts.
+
+    The scanner should finish evaluating every ticker before this selection runs.
+    It then sends no more than the configured top two ETF setups and top three
+    individual-stock setups, while still respecting the overall high-quality cap.
     """
     ranked_alerts = sorted(
         alert_pool,
         key=lambda x: x.get("ranking_score", 0),
         reverse=True,
     )
-    return ranked_alerts[:high_quality_alert_cap()]
+    etf_cap = max(0, int(MAX_ETF_ALERTS_PER_SCAN))
+    stock_cap = max(0, int(MAX_STOCK_ALERTS_PER_SCAN))
+
+    selected_etfs = [candidate for candidate in ranked_alerts if is_etf_alert(candidate)][:etf_cap]
+    selected_stocks = [candidate for candidate in ranked_alerts if not is_etf_alert(candidate)][:stock_cap]
+
+    selected = selected_etfs + selected_stocks
+    selected.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
+    return selected[:high_quality_alert_cap()]
 
 
 def apply_enhancements(bot_cls):

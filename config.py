@@ -293,8 +293,11 @@ SR_REJECTION_WEIGHT = 25
 
 RANK_TOP_ALERTS_ONLY = True
 # Hard cap for high-quality setup alerts sent after a full watchlist scan.
-# Intraday and swing candidates are ranked together so only the top five setups fire.
-MAX_ALERTS_PER_SCAN = 5
+# Intraday and swing candidates are ranked together, then capped at the top
+# two ETF setups and top three individual-stock setups.
+MAX_ETF_ALERTS_PER_SCAN = int(os.getenv("MAX_ETF_ALERTS_PER_SCAN", "2"))
+MAX_STOCK_ALERTS_PER_SCAN = int(os.getenv("MAX_STOCK_ALERTS_PER_SCAN", "3"))
+MAX_ALERTS_PER_SCAN = MAX_ETF_ALERTS_PER_SCAN + MAX_STOCK_ALERTS_PER_SCAN
 # Optional quieter cap; values above MAX_ALERTS_PER_SCAN are clamped back to the top-five hard cap.
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
@@ -317,6 +320,11 @@ SECTOR_ETF_MAP = {
     "XOM": "XLE", "CVX": "XLE", "OXY": "XLE",
     "TSLA": "XLY", "AMZN": "XLY",
 }
+
+ETF_ALERT_SYMBOLS = tuple(dict.fromkeys([
+    "SPY", "QQQ", "IWM", "DIA", "SMH", "SOXX", "TQQQ", "SQQQ",
+    "USO", "ARKK", "XLK", "XLF", "XLE", "XLY", *SECTOR_ETF_MAP.values(),
+]))
 
 LOG_FILE = "stock_technical_alerts.csv"
 

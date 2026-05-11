@@ -5,7 +5,9 @@ from swing_integration import (
     _hold_days_to_horizon_minutes,
     meets_swing_benchmark,
     process_swing_candidate,
+    send_prepared_swing_candidate,
     swing_benchmark_reject_reasons,
+    swing_ranking_score,
 )
 
 
@@ -82,6 +84,48 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["direction"], "CALL")
 
+    def test_process_swing_candidate_can_defer_telegram_until_ranked_scan_selection(self):
+        class Bot:
+            def send_telegram_msg(self, _message):
+                raise AssertionError("deferred swing candidate should not send immediately")
+
+        with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
+            patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.log_swing_alert") as log_swing_alert, \
+            patch("swing_integration.track_outcome") as track_outcome:
+            result = process_swing_candidate(Bot(), "TEST", {}, send_alert=False)
+
+        self.assertIsNotNone(result)
+        self.assertIn("ranking_score", result)
+        log_swing_alert.assert_not_called()
+        track_outcome.assert_not_called()
+
+    def test_send_prepared_swing_candidate_finalizes_deferred_alert(self):
+        class Bot:
+            def send_telegram_msg(self, _message):
+                return True
+
+        setup = self._setup()
+        setup["ai_reasoning"] = self._reasoning()
+
+        with patch("swing_integration.log_swing_alert") as log_swing_alert, \
+            patch("swing_integration.track_outcome") as track_outcome, \
+            patch.dict("swing_integration.SWING_ALERT_CACHE", {}, clear=True):
+            sent = send_prepared_swing_candidate(Bot(), "TEST", setup, {}, alert_time=123)
+
+        self.assertTrue(sent)
+        log_swing_alert.assert_called_once()
+        track_outcome.assert_called_once()
+
+    def test_swing_ranking_prefers_better_quality_setups(self):
+        lower = self._setup()
+        lower.update({"score": 88, "risk_reward": 1.8, "decision": "A"})
+        lower["ai_reasoning"] = {"vision": {"quality": "GOOD"}, "mtf": {"structure": "GOOD_ALIGNMENT"}}
+
+        higher = self._setup()
+        higher["ai_reasoning"] = self._reasoning()
+
+        self.assertGreater(swing_ranking_score(higher), swing_ranking_score(lower))
 
     def test_process_swing_candidate_uses_entry_for_option_contract_price(self):
         class Bot:

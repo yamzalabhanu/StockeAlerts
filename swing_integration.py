@@ -200,7 +200,89 @@ def log_swing_alert(ticker, setup, tech):
         print(f"{ticker}: swing log error: {e}")
 
 
-def process_swing_candidate(bot, ticker, tech):
+def swing_ranking_score(setup):
+    """Return a scan-comparable rank for high-quality swing candidates."""
+    setup = setup or {}
+    reasoning = setup.get("ai_reasoning") or {}
+    score = safe_float(setup.get("score") or reasoning.get("final_score"))
+    risk_reward = safe_float(setup.get("risk_reward"))
+    confidence = safe_float(setup.get("calibrated_confidence") or setup.get("ml_probability"))
+    priority = safe_float(setup.get("historical_priority_bonus") or reasoning.get("priority_bonus"))
+
+    ranking = score + (risk_reward * 10) + confidence + priority
+    if setup.get("decision") == "A+" or setup.get("tier") == "A+":
+        ranking += 20
+    elif setup.get("decision") == "A" or setup.get("tier") == "A":
+        ranking += 10
+
+    mtf_structure = (reasoning.get("mtf") or {}).get("structure")
+    if mtf_structure == "STRONG_ALIGNMENT":
+        ranking += 15
+    elif mtf_structure == "GOOD_ALIGNMENT":
+        ranking += 10
+
+    chart_structure = (reasoning.get("vision") or {}).get("quality")
+    if chart_structure == "ELITE":
+        ranking += 10
+    elif chart_structure == "GOOD":
+        ranking += 5
+
+    return round(ranking, 2)
+
+
+def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
+    """Send, log, and track an already-ranked swing candidate."""
+    setup = setup or {}
+    tech = tech or {}
+    alert_time = alert_time or time.time()
+
+    telegram_sent = False
+    try:
+        message = format_swing_alert(ticker, setup)
+        telegram_sent = bool(bot.send_telegram_msg(message))
+        if telegram_sent:
+            SWING_ALERT_CACHE[ticker] = alert_time
+        else:
+            print(f"{ticker}: swing telegram send failed; alert not counted as sent")
+    except Exception as e:
+        print(f"{ticker}: swing telegram error: {e}")
+
+    if not telegram_sent:
+        return False
+
+    log_swing_alert(ticker, setup, tech)
+
+    try:
+        alert_time_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+        reasoning = setup.get("ai_reasoning") or {}
+        learning_context = reasoning.get("learning_context") or {}
+        track_outcome(
+            ticker=ticker,
+            direction=setup.get("direction"),
+            entry=float(setup.get("entry")),
+            stop=float(setup.get("stop")),
+            target=float(setup.get("target")),
+            alert_time_iso=alert_time_iso,
+            alert_type="SWING",
+            entry_mode="SWING",
+            horizon_minutes=_hold_days_to_horizon_minutes(setup.get("hold_days")),
+            setup_context={
+                "setup_key": learning_context.get("setup_key"),
+                "market_regime": (reasoning.get("regime") or {}).get("regime"),
+                "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
+                "chart_structure": (reasoning.get("vision") or {}).get("quality"),
+                "ai_confidence": setup.get("score"),
+                "calibrated_confidence": setup.get("calibrated_confidence"),
+                "score": setup.get("score"),
+            },
+        )
+    except Exception as e:
+        print(f"{ticker}: swing outcome tracking skipped: {e}")
+
+    return True
+
+
+def process_swing_candidate(bot, ticker, tech, send_alert=True):
     if not ENABLE_SWING_ALERTS:
         return None
 
@@ -307,47 +389,12 @@ def process_swing_candidate(bot, ticker, tech):
     except Exception as e:
         print(f"{ticker}: swing options flow/contract selection skipped: {e}")
 
-    telegram_sent = False
-    try:
-        message = format_swing_alert(ticker, setup)
-        telegram_sent = bool(bot.send_telegram_msg(message))
-        if telegram_sent:
-            SWING_ALERT_CACHE[ticker] = now
-        else:
-            print(f"{ticker}: swing telegram send failed; alert not counted as sent")
-    except Exception as e:
-        print(f"{ticker}: swing telegram error: {e}")
+    setup["ranking_score"] = swing_ranking_score(setup)
 
-    if not telegram_sent:
+    if not send_alert:
+        return setup
+
+    if not send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=now):
         return None
-
-    log_swing_alert(ticker, setup, tech)
-
-    try:
-        alert_time = dt.datetime.now(dt.timezone.utc).isoformat()
-        reasoning = setup.get("ai_reasoning") or {}
-        learning_context = reasoning.get("learning_context") or {}
-        track_outcome(
-            ticker=ticker,
-            direction=setup.get("direction"),
-            entry=float(setup.get("entry")),
-            stop=float(setup.get("stop")),
-            target=float(setup.get("target")),
-            alert_time_iso=alert_time,
-            alert_type="SWING",
-            entry_mode="SWING",
-            horizon_minutes=_hold_days_to_horizon_minutes(setup.get("hold_days")),
-            setup_context={
-                "setup_key": learning_context.get("setup_key"),
-                "market_regime": (reasoning.get("regime") or {}).get("regime"),
-                "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
-                "chart_structure": (reasoning.get("vision") or {}).get("quality"),
-                "ai_confidence": setup.get("score"),
-                "calibrated_confidence": setup.get("calibrated_confidence"),
-                "score": setup.get("score"),
-            },
-        )
-    except Exception as e:
-        print(f"{ticker}: swing outcome tracking skipped: {e}")
 
     return setup

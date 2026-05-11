@@ -6,13 +6,13 @@ from openai_models import chat_completion_options, is_reasoning_model
 class OpenAIModelConfigTests(unittest.TestCase):
     def test_reasoning_model_uses_reasoning_effort_and_omits_temperature(self):
         options = chat_completion_options(
-            model="gpt-5.5",
+            model="gpt-5-mini",
             reasoning_effort="high",
             temperature=0.1,
             messages=[{"role": "user", "content": "test"}],
         )
 
-        self.assertEqual(options["model"], "gpt-5.5")
+        self.assertEqual(options["model"], "gpt-5-mini")
         self.assertEqual(options["reasoning_effort"], "high")
         self.assertNotIn("temperature", options)
         self.assertTrue(is_reasoning_model(options["model"]))

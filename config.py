@@ -6,6 +6,40 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 
+def normalize_api_key(value):
+    """Return a bare API key suitable for SDK auth headers and query params.
+
+    Environment managers sometimes store secrets as full header values like
+    ``Bearer <token>`` or copied query fragments like ``apiKey=<token>``.
+    Polygon's SDK builds its own Authorization header, so passing those decorated
+    values through can produce a malformed header.
+    """
+    if value is None:
+        return ""
+
+    key = str(value).strip().strip('"\'')
+    if not key:
+        return ""
+
+    lowered = key.lower()
+    if lowered.startswith("authorization:"):
+        key = key.split(":", 1)[1].strip()
+        lowered = key.lower()
+
+    if lowered.startswith("bearer "):
+        key = key[7:].strip()
+    elif lowered.startswith("bearer:"):
+        key = key.split(":", 1)[1].strip()
+
+    if "apikey=" in key.lower():
+        for part in key.replace("?", "&").split("&"):
+            name, sep, candidate = part.partition("=")
+            if sep and name.lower().endswith("apikey"):
+                key = candidate.strip()
+                break
+
+    return key.strip().strip('"\'')
+
 MARKET_TZ = ZoneInfo("America/New_York")
 
 # --- ALERT MODES ---
@@ -222,7 +256,7 @@ SECTOR_ETF_MAP = {
 
 LOG_FILE = "stock_technical_alerts.csv"
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+POLYGON_API_KEY = normalize_api_key(os.getenv("POLYGON_API_KEY", ""))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_SCAN_MODEL = os.getenv("OPENAI_SCAN_MODEL", "gpt-5.3")
 OPENAI_HIGH_QUALITY_MODEL = os.getenv("OPENAI_HIGH_QUALITY_MODEL", "gpt-5.5")

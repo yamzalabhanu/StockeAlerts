@@ -6,7 +6,7 @@ from bot_utils import pct_diff
 from config import *
 from ml_learning import get_setup_score, train_from_rows
 from ml_sklearn_model import adjust_score_with_logistic
-from swing_integration import process_swing_candidate
+from swing_integration import process_swing_candidate, send_prepared_swing_candidate
 
 _ORIGINAL_BUILD_CANDIDATE_ATTR = "_original_build_candidate_before_enhancements"
 _ORIGINAL_CHECK_TICKER_ATTR = "_original_check_ticker_before_swing_integration"
@@ -69,15 +69,24 @@ def apply_enhancements(bot_cls):
                 return None
 
             # Swing scan runs before intraday quality-window gate.
-            # This allows 2-10 day swing setup alerts outside scalp windows.
+            # This allows 2-10 day swing setup alerts outside scalp windows while
+            # deferring delivery until the whole scan can rank every candidate.
             try:
-                swing_sent_this_scan = getattr(self, "_swing_alerts_sent_this_scan", 0)
-                if swing_sent_this_scan < MAX_SWING_ALERTS_PER_SCAN:
-                    swing_setup = process_swing_candidate(self, ticker, tech)
-                    if swing_setup:
-                        self._swing_alerts_sent_this_scan = swing_sent_this_scan + 1
-                else:
-                    print(f"{ticker}: swing alert scan cap reached ({MAX_SWING_ALERTS_PER_SCAN})")
+                if ENABLE_SWING_ALERTS:
+                    swing_candidates = getattr(self, "_swing_candidates_this_scan", None)
+                    swing_setup = process_swing_candidate(
+                        self,
+                        ticker,
+                        tech,
+                        send_alert=swing_candidates is None,
+                    )
+                    if swing_setup and swing_candidates is not None:
+                        swing_candidates.append({
+                            "ticker": ticker,
+                            "setup": swing_setup,
+                            "tech": tech,
+                            "ranking_score": swing_setup.get("ranking_score", swing_setup.get("score", 0)),
+                        })
             except Exception as e:
                 print(f"{ticker}: swing scan error: {e}")
 
@@ -113,6 +122,7 @@ def apply_enhancements(bot_cls):
 
                 self.tickers = self.get_auto_watchlist()
                 self._swing_alerts_sent_this_scan = 0
+                self._swing_candidates_this_scan = []
                 candidates = []
 
                 for ticker in self.tickers:
@@ -121,11 +131,23 @@ def apply_enhancements(bot_cls):
                         candidates.append(candidate)
 
                 candidates.sort(key=lambda x: x["ranking_score"], reverse=True)
-                selected = candidates[:MAX_ALERTS_PER_SCAN] if RANK_TOP_ALERTS_ONLY else candidates
+                swing_candidates = getattr(self, "_swing_candidates_this_scan", [])
+                swing_candidates.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
+
+                alert_pool = []
+                if in_intraday_window and ENABLE_INTRADAY_ALERTS:
+                    alert_pool.extend({"alert_type": "INTRADAY", **c} for c in candidates)
+                if ENABLE_SWING_ALERTS:
+                    alert_pool.extend({"alert_type": "SWING", **c} for c in swing_candidates)
+
+                alert_pool.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
+                scan_alert_cap = max(0, int(MAX_HIGH_QUALITY_ALERTS_PER_SCAN))
+                selected = alert_pool[:scan_alert_cap]
 
                 sent = 0
-                if in_intraday_window and ENABLE_INTRADAY_ALERTS:
-                    for c in selected:
+                swing_sent = 0
+                for c in selected:
+                    if c.get("alert_type") == "INTRADAY":
                         self.alert(
                             c["ticker"],
                             c["setup"],
@@ -138,11 +160,17 @@ def apply_enhancements(bot_cls):
                         )
                         self.mark_alert(c["ticker"], c["setup"]["direction"])
                         sent += 1
+                    elif send_prepared_swing_candidate(self, c["ticker"], c["setup"], c["tech"]):
+                        self._swing_alerts_sent_this_scan += 1
+                        swing_sent += 1
 
                 sleep_for = SCAN_INTERVAL_SEC if in_intraday_window else 600
                 scan_label = "full scan" if in_intraday_window else "swing scan"
-                swing_sent = getattr(self, "_swing_alerts_sent_this_scan", 0)
-                print(f"✅ {scan_label} complete | candidates={len(candidates)} | intraday_sent={sent} | swing_sent={swing_sent} | sleeping {sleep_for}s")
+                print(
+                    f"✅ {scan_label} complete | candidates={len(candidates)} | "
+                    f"swing_candidates={len(swing_candidates)} | intraday_sent={sent} | "
+                    f"swing_sent={swing_sent} | alert_cap={scan_alert_cap} | sleeping {sleep_for}s"
+                )
                 await asyncio.sleep(sleep_for)
             except Exception as e:
                 print(f"Scan loop error: {e}")

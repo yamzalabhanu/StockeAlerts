@@ -8,15 +8,15 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
-### 🧠 GPT-5.5 Reasoning Defaults
+### 🧠 GPT-5 Mini Reasoning Defaults
 
-AI-backed market analysis, alert gates, trade-management decisions, and chart-vision reads now default to `gpt-5.5`. Reasoning-capable models are configured through a shared OpenAI options helper that passes `reasoning_effort` instead of forcing low-temperature chat behavior, while non-reasoning model overrides can still use temperature settings.
+AI-backed market analysis, alert gates, trade-management decisions, and chart-vision reads now default to `gpt-5-mini`. Reasoning-capable models are configured through a shared OpenAI options helper that passes `reasoning_effort` instead of forcing low-temperature chat behavior, while non-reasoning model overrides can still use temperature settings.
 
 Key controls include:
 
 | Setting | Purpose |
 |---|---|
-| `OPENAI_REASONING_MODEL` | Market-data reasoning model for AI alert decisions, defaults to `gpt-5.5` |
+| `OPENAI_REASONING_MODEL` | Market-data reasoning model for AI alert decisions, defaults to `gpt-5-mini` |
 | `OPENAI_REASONING_EFFORT` | Reasoning depth for GPT-5/o-series models, defaults to `medium` |
 | `OPENAI_VISION_MODEL` | Chart-vision model override, defaults to the reasoning model |
 
@@ -753,7 +753,7 @@ streamlit run streamlit_dashboard.py
 
 ## 🧠 OpenAI Market Reasoning Model
 
-StockeAlerts defaults its AI alert gates to `gpt-5.5` with `medium` reasoning effort so the model can think through trend, volume, regime, risk/reward, entry timing, and options context before approving alerts. Override `OPENAI_REASONING_MODEL` if you need a cheaper or lower-latency model, and adjust `OPENAI_REASONING_EFFORT` (`low`, `medium`, `high`, etc.) to trade speed/cost for deeper reasoning.
+StockeAlerts defaults its AI alert gates to `gpt-5-mini` with `medium` reasoning effort so the model can think through trend, volume, regime, risk/reward, entry timing, and options context before approving alerts. Override `OPENAI_REASONING_MODEL` if you need a cheaper or lower-latency model, and adjust `OPENAI_REASONING_EFFORT` (`low`, `medium`, `high`, etc.) to trade speed/cost for deeper reasoning.
 
 ---
 
@@ -770,9 +770,9 @@ python daily_report_engine.py
 
 ```text
 OPENAI_API_KEY=
-OPENAI_REASONING_MODEL=gpt-5.5
+OPENAI_REASONING_MODEL=gpt-5-mini
 OPENAI_REASONING_EFFORT=medium
-OPENAI_VISION_MODEL=gpt-5.5
+OPENAI_VISION_MODEL=gpt-5-mini
 POLYGON_API_KEY=
 AUTO_WATCHLIST_DATE=        # Optional YYYY-MM-DD; uses Polygon historical active movers for that day
 TELEGRAM_TOKEN=

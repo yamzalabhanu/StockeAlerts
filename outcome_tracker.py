@@ -1,9 +1,8 @@
-import csv
-import os
 import datetime as dt
 from config import *
 from polygon import RESTClient
 from performance_learning import refresh_learning_model
+from outcome_schema import append_outcome_row
 
 client = RESTClient(POLYGON_API_KEY)
 
@@ -153,15 +152,7 @@ def track_outcome(
     }
     row["forecast_accuracy_pct"] = _forecast_accuracy(row["expected_move_pct"], row["max_gain_pct"])
 
-    file_exists = os.path.exists(OUTCOME_FILE)
-
-    with open(OUTCOME_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=row.keys())
-
-        if not file_exists:
-            writer.writeheader()
-
-        writer.writerow(row)
+    append_outcome_row(OUTCOME_FILE, row)
 
     try:
         refresh_learning_model()

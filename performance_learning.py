@@ -1,4 +1,3 @@
-import csv
 import datetime as dt
 import json
 import os
@@ -6,6 +5,7 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional
 
 from config import LOG_FILE
+from outcome_schema import read_outcome_rows
 
 OUTCOME_FILE = "alert_outcomes.csv"
 LEARNING_FILE = "setup_performance_learning.json"
@@ -80,11 +80,7 @@ def _normalize(value: Any, default: str = "UNKNOWN") -> str:
 
 
 def _read_csv_rows(path: str) -> List[Dict[str, Any]]:
-    if not os.path.exists(path):
-        return []
-
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    return read_outcome_rows(path)
 
 
 def _is_win(row: Dict[str, Any]) -> Optional[bool]:
@@ -121,10 +117,11 @@ def _group_keys(row: Dict[str, Any]) -> Iterable[str]:
 
 
 def _forecast_accuracy(row: Dict[str, Any]) -> Optional[float]:
-    max_gain = _safe_float(row.get("max_gain_pct"))
-    max_loss = _safe_float(row.get("max_loss_pct"))
-    if _is_win(row) is None and max_gain == 0 and max_loss == 0:
+    win = _is_win(row)
+    if win is None:
         return None
+
+    max_gain = _safe_float(row.get("max_gain_pct"))
 
     explicit = row.get("forecast_accuracy_pct")
     if explicit not in (None, ""):

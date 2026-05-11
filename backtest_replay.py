@@ -2,6 +2,7 @@ import csv
 import os
 import pandas as pd
 from bot_enhancements import learn_from_outcomes
+from outcome_schema import read_outcome_rows
 
 LOG_FILE = "stock_technical_alerts.csv"
 OUTCOME_FILE = "alert_outcomes.csv"
@@ -12,10 +13,14 @@ def read_csv_robust(path):
     """Read CSV logs even when older rows have mismatched column counts.
 
     The bot schema changed over time, so old local CSV files may contain rows with
-    extra fields. This reader skips malformed rows instead of crashing replay.
+    extra fields. For alert outcomes, repair known mixed-schema rows so learning
+    keeps those samples instead of skipping them.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(path)
+
+    if path == OUTCOME_FILE:
+        return pd.DataFrame(read_outcome_rows(path))
 
     try:
         return pd.read_csv(path)

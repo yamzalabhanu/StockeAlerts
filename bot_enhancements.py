@@ -7,6 +7,7 @@ from config import *
 from ml_learning import get_setup_score, train_from_rows
 from ml_sklearn_model import adjust_score_with_logistic
 from swing_integration import process_swing_candidate, send_prepared_swing_candidate
+from alert_history import alerted_tickers_today, mark_alerted_today, was_alerted_today
 
 _ORIGINAL_BUILD_CANDIDATE_ATTR = "_original_build_candidate_before_enhancements"
 _ORIGINAL_CHECK_TICKER_ATTR = "_original_check_ticker_before_swing_integration"
@@ -34,25 +35,42 @@ def is_etf_alert(candidate):
     return _candidate_ticker(candidate) in set(ETF_ALERT_SYMBOLS)
 
 
-def select_top_high_quality_alerts(alert_pool):
-    """Rank a completed scan and return the best ETF and stock alerts.
+def select_top_high_quality_alerts(alert_pool, excluded_tickers=None):
+    """Rank a completed scan and return capped intraday and swing alerts.
 
     The scanner should finish evaluating every ticker before this selection runs.
-    It then sends no more than the configured top two ETF setups and top three
-    individual-stock setups, while still respecting the overall high-quality cap.
+    It sends no more than five intraday alerts and five swing-trade alerts per
+    scan by default, while suppressing tickers that already alerted today and
+    avoiding multiple alerts for the same ticker in the same ranked batch.
     """
+    excluded = {str(ticker).upper() for ticker in (excluded_tickers or set())}
     ranked_alerts = sorted(
         alert_pool,
         key=lambda x: x.get("ranking_score", 0),
         reverse=True,
     )
-    etf_cap = max(0, int(MAX_ETF_ALERTS_PER_SCAN))
-    stock_cap = max(0, int(MAX_STOCK_ALERTS_PER_SCAN))
+    per_type_caps = {
+        "INTRADAY": max(0, int(MAX_INTRADAY_ALERTS_PER_SCAN)),
+        "SWING": max(0, int(MAX_SWING_ALERTS_PER_SCAN)),
+    }
+    selected_counts = {alert_type: 0 for alert_type in per_type_caps}
+    selected = []
+    selected_tickers = set()
 
-    selected_etfs = [candidate for candidate in ranked_alerts if is_etf_alert(candidate)][:etf_cap]
-    selected_stocks = [candidate for candidate in ranked_alerts if not is_etf_alert(candidate)][:stock_cap]
+    for candidate in ranked_alerts:
+        ticker = _candidate_ticker(candidate)
+        alert_type = str(candidate.get("alert_type", "INTRADAY")).upper()
+        if not ticker or ticker in excluded or ticker in selected_tickers:
+            continue
+        if alert_type not in per_type_caps:
+            continue
+        if selected_counts[alert_type] >= per_type_caps[alert_type]:
+            continue
 
-    selected = selected_etfs + selected_stocks
+        selected.append(candidate)
+        selected_tickers.add(ticker)
+        selected_counts[alert_type] += 1
+
     selected.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
     return selected[:high_quality_alert_cap()]
 
@@ -102,6 +120,10 @@ def apply_enhancements(bot_cls):
     async def enhanced_check_ticker(self, ticker):
         try:
             await asyncio.sleep(0.15)
+
+            if was_alerted_today(ticker):
+                print(f"{ticker}: skipped, alert already sent today")
+                return None
 
             tech = self.get_technical_context(ticker)
             if not tech:
@@ -179,12 +201,19 @@ def apply_enhancements(bot_cls):
                 if ENABLE_SWING_ALERTS:
                     alert_pool.extend({"alert_type": "SWING", **c} for c in swing_candidates)
 
-                selected = select_top_high_quality_alerts(alert_pool)
+                selected = select_top_high_quality_alerts(
+                    alert_pool,
+                    excluded_tickers=alerted_tickers_today(),
+                )
                 scan_alert_cap = high_quality_alert_cap()
 
                 sent = 0
                 swing_sent = 0
                 for c in selected:
+                    if was_alerted_today(c["ticker"]):
+                        print(f"{c['ticker']}: skipped, alert already sent today")
+                        continue
+
                     if c.get("alert_type") == "INTRADAY":
                         self.alert(
                             c["ticker"],
@@ -197,9 +226,11 @@ def apply_enhancements(bot_cls):
                             c["ranking_score"],
                         )
                         self.mark_alert(c["ticker"], c["setup"]["direction"])
+                        mark_alerted_today(c["ticker"])
                         sent += 1
                     elif send_prepared_swing_candidate(self, c["ticker"], c["setup"], c["tech"]):
                         self._swing_alerts_sent_this_scan += 1
+                        mark_alerted_today(c["ticker"])
                         swing_sent += 1
 
                 sleep_for = SCAN_INTERVAL_SEC if in_intraday_window else 600
@@ -207,7 +238,7 @@ def apply_enhancements(bot_cls):
                 print(
                     f"✅ {scan_label} complete | candidates={len(candidates)} | "
                     f"swing_candidates={len(swing_candidates)} | intraday_sent={sent} | "
-                    f"swing_sent={swing_sent} | alert_cap={scan_alert_cap} | sleeping {sleep_for}s"
+                    f"swing_sent={swing_sent} | per_scan_cap={scan_alert_cap} | sleeping {sleep_for}s"
                 )
                 await asyncio.sleep(sleep_for)
             except Exception as e:

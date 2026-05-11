@@ -66,7 +66,7 @@ SWING_HOLD_DAYS_MAX = 10
 SWING_PULLBACK_TOLERANCE_PCT = 1.0
 SWING_ATR_STOP_MULTIPLIER = 1.5
 SWING_ATR_TARGET_MULTIPLIER = 4.0
-MAX_SWING_ALERTS_PER_SCAN = 20
+MAX_SWING_ALERTS_PER_SCAN = int(os.getenv("MAX_SWING_ALERTS_PER_SCAN", "5"))
 
 # --- RISK MANAGEMENT ---
 ACCOUNT_SIZE = 100000
@@ -233,12 +233,11 @@ SR_REJECTION_WEIGHT = 25
 
 RANK_TOP_ALERTS_ONLY = True
 # Hard cap for high-quality setup alerts sent after a full watchlist scan.
-# Intraday and swing candidates are ranked together, then capped at the top
-# two ETF setups and top three individual-stock setups.
-MAX_ETF_ALERTS_PER_SCAN = int(os.getenv("MAX_ETF_ALERTS_PER_SCAN", "2"))
-MAX_STOCK_ALERTS_PER_SCAN = int(os.getenv("MAX_STOCK_ALERTS_PER_SCAN", "3"))
-MAX_ALERTS_PER_SCAN = MAX_ETF_ALERTS_PER_SCAN + MAX_STOCK_ALERTS_PER_SCAN
-# Optional quieter cap; values above MAX_ALERTS_PER_SCAN are clamped back to the top-five hard cap.
+# Intraday and swing candidates are ranked independently so one scan can send
+# up to five intraday alerts and up to five swing-trade alerts.
+MAX_INTRADAY_ALERTS_PER_SCAN = int(os.getenv("MAX_INTRADAY_ALERTS_PER_SCAN", "5"))
+MAX_ALERTS_PER_SCAN = MAX_INTRADAY_ALERTS_PER_SCAN + MAX_SWING_ALERTS_PER_SCAN
+# Optional quieter cap; values above MAX_ALERTS_PER_SCAN are clamped back to the per-type hard caps.
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
 QUALITY_WINDOWS = [

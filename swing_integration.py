@@ -18,6 +18,7 @@ from setup_filters import PASS, REJECT, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from options_engine import analyze_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
+from alert_history import mark_alerted_today, was_alerted_today
 
 SWING_ALERT_CACHE = {}
 
@@ -193,8 +194,17 @@ def log_swing_alert(ticker, setup, tech):
     }
 
     try:
+        file_exists = False
+        try:
+            with open(LOG_FILE, "r", encoding="utf-8"):
+                file_exists = True
+        except FileNotFoundError:
+            pass
+
         with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            if not file_exists:
+                writer.writeheader()
             writer.writerow(row)
     except Exception as e:
         print(f"{ticker}: swing log error: {e}")
@@ -232,6 +242,10 @@ def swing_ranking_score(setup):
 
 def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
     """Send, log, and track an already-ranked swing candidate."""
+    if was_alerted_today(ticker):
+        print(f"{ticker}: swing skipped, alert already sent today")
+        return False
+
     setup = setup or {}
     tech = tech or {}
     alert_time = alert_time or time.time()
@@ -242,6 +256,7 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
         telegram_sent = bool(bot.send_telegram_msg(message))
         if telegram_sent:
             SWING_ALERT_CACHE[ticker] = alert_time
+            mark_alerted_today(ticker)
         else:
             print(f"{ticker}: swing telegram send failed; alert not counted as sent")
     except Exception as e:
@@ -284,6 +299,10 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
 
 def process_swing_candidate(bot, ticker, tech, send_alert=True):
     if not ENABLE_SWING_ALERTS:
+        return None
+
+    if was_alerted_today(ticker):
+        print(f"{ticker}: swing skipped, alert already sent today")
         return None
 
     tech = tech or {}

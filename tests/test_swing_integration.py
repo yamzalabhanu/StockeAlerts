@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch
 
+import alert_history
+
 from swing_integration import (
     _hold_days_to_horizon_minutes,
     meets_swing_benchmark,
@@ -29,6 +31,14 @@ class SwingIntegrationHoldDaysTests(unittest.TestCase):
 
 
 class SwingIntegrationTelegramSendTests(unittest.TestCase):
+    def setUp(self):
+        alert_history._ALERTED_TICKERS_BY_DAY.clear()
+        alert_history._LOADED_LOG_DAYS.add(alert_history.alert_day())
+
+    def tearDown(self):
+        alert_history._ALERTED_TICKERS_BY_DAY.clear()
+        alert_history._LOADED_LOG_DAYS.clear()
+
     def _setup(self):
         return {
             "direction": "CALL",

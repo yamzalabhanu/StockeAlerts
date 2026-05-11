@@ -22,6 +22,7 @@ Risk: LOW / MEDIUM / HIGH
 
     response = client.chat.completions.create(
         **chat_completion_options(
+            setup=trade,
             messages=[{"role": "user", "content": prompt}],
         ),
     )

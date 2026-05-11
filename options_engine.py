@@ -8,9 +8,11 @@ from typing import Any, Optional
 
 import requests
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") or POLYGON_API_KEY
-OPTIONS_API_KEY = os.getenv("OPTIONS_API_KEY") or MASSIVE_API_KEY
+from config import normalize_api_key
+
+POLYGON_API_KEY = normalize_api_key(os.getenv("POLYGON_API_KEY"))
+MASSIVE_API_KEY = normalize_api_key(os.getenv("MASSIVE_API_KEY")) or POLYGON_API_KEY
+OPTIONS_API_KEY = normalize_api_key(os.getenv("OPTIONS_API_KEY")) or MASSIVE_API_KEY
 OPTIONS_API_BASE_URL = os.getenv("OPTIONS_API_BASE_URL", "https://api.polygon.io").rstrip("/")
 
 MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "1000"))

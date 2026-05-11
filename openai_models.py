@@ -53,7 +53,7 @@ def is_high_quality_setup(
     score: float | int | str | None = None,
     tier: str | None = None,
 ) -> bool:
-    """Return True when a setup qualifies for premium GPT-5.5 review.
+    """Return True when a setup qualifies for premium GPT-5.2 review.
 
     A setup is promoted only when its numeric score is at least the configured
     high-quality threshold (95 by default) or its tier/decision is explicitly
@@ -83,8 +83,8 @@ def market_reasoning_model(
 ) -> str:
     """Choose the LLM for market-data analysis.
 
-    Broad all-ticker scans use GPT-5.3. Only score >=95 or A+ setups are routed
-    to GPT-5.5 for premium confirmation. ``OPENAI_REASONING_MODEL`` remains a
+    Broad all-ticker scans use GPT-5 mini. Only score >=95 or A+ setups are routed
+    to GPT-5.2 for premium confirmation. ``OPENAI_REASONING_MODEL`` remains a
     backward-compatible override if operators still set it explicitly.
     """
     if is_high_quality_setup(setup, score=score, tier=tier):

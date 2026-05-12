@@ -51,7 +51,10 @@ def place_trade(symbol, qty, side):
 
 
 def place_option_limit_order(option_symbol: str, contracts: int, side: str, limit_price: float):
-    """Place an options limit order. Use paper mode first.
+    """Place an options DAY limit order. Use paper mode first.
+
+    DAY limit orders submitted after options market hours are accepted for queuing
+    by the broker instead of attempting an extended-hours options execution.
 
     Note: Alpaca options access must be enabled on your account. If unavailable,
     this returns the broker error without stopping the scanner.

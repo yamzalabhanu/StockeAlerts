@@ -781,6 +781,118 @@ def _candidate_from_chain_item(
     return candidate, None
 
 
+
+def _default_otm_candidate_from_chain_item(
+    symbol: str,
+    option_type: str,
+    item: dict[str, Any],
+    price: float,
+    fallback_expiry: str = "",
+) -> Optional[OptionCandidate]:
+    """Build a same-week 5% OTM fallback candidate without liquidity filters."""
+    details = item.get("details", {}) or {}
+    strike = _strike(details)
+    contract = _option_ticker(details)
+    exp = _expiration_date(details) or fallback_expiry
+    contract_type = _option_type(details) or option_type
+    if not contract or not strike or not exp:
+        return None
+    if contract_type and contract_type != option_type:
+        return None
+
+    try:
+        dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
+    except ValueError:
+        return None
+
+    quote = item.get("last_quote", {}) or {}
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    bid_float = _safe_float(bid) if bid is not None else None
+    ask_float = _safe_float(ask) if ask is not None else None
+    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    spread = _spread_pct(bid_float, ask_float)
+    greeks = item.get("greeks", {}) or {}
+    delta = greeks.get("delta")
+    gamma = greeks.get("gamma")
+    theta = greeks.get("theta")
+    iv = item.get("implied_volatility")
+    volume = _snapshot_volume(item)
+    oi = _snapshot_open_interest(item)
+    dollar_volume = volume * (mid or 0.0) * 100
+
+    option_label = "CALL" if option_type == "call" else "PUT"
+    pct_label = "+5%" if option_type == "call" else "-5%"
+    return OptionCandidate(
+        underlying=symbol,
+        contract_symbol=contract,
+        option_type=option_label,
+        strike=strike,
+        expiry=exp,
+        dte=dte,
+        bid=bid_float,
+        ask=ask_float,
+        mid=round(mid, 2) if mid else None,
+        spread_pct=round(spread, 2) if spread is not None else None,
+        delta=round(_safe_float(delta), 3) if delta is not None else None,
+        gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
+        theta=round(_safe_float(theta), 4) if theta is not None else None,
+        implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
+        volume=volume,
+        open_interest=oi,
+        status="OK",
+        reason=f"Default fallback after SKIP: buy same-week {pct_label} OTM {option_label} contract",
+        recommendation_score=0.0,
+        liquidity_score=0.0,
+        volume_oi_ratio=round(volume / max(oi, 1), 3) if oi is not None else None,
+        dollar_volume=round(dollar_volume, 2),
+    )
+
+
+def _select_same_week_default_candidate(
+    symbol: str,
+    option_type: str,
+    price: float,
+    api: OptionsApiClient,
+) -> Optional[OptionCandidate]:
+    """Select the nearest same-week +5% call or -5% put contract for SKIP fallbacks."""
+    if price <= 0 or option_type not in {"call", "put"}:
+        return None
+
+    expiries = _next_fridays(min_dte=0, max_dte=6)
+    expiry = expiries[0] if expiries else ""
+    if not expiry:
+        return None
+
+    target_strike = price * (1.05 if option_type == "call" else 0.95)
+    try:
+        results = api.option_snapshots(
+            symbol,
+            expiration_date=expiry,
+            contract_type=option_type,
+            limit=250,
+        )
+    except Exception:
+        return None
+
+    candidates: list[OptionCandidate] = []
+    for item in results:
+        candidate = _default_otm_candidate_from_chain_item(symbol, option_type, item, price, fallback_expiry=expiry)
+        if candidate:
+            candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    return min(
+        candidates,
+        key=lambda candidate: (
+            abs(candidate.strike - target_strike),
+            -float(candidate.volume or 0),
+            -float(candidate.open_interest or 0),
+        ),
+    )
+
 def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
     """Rank candidates by raw volume and OI first, then quality tie-breakers.
 
@@ -965,13 +1077,17 @@ def select_option_contract(
     if best:
         return best
 
+    default_candidate = _select_same_week_default_candidate(symbol, option_type, price, api)
+    if default_candidate:
+        return default_candidate
+
     rejection_text = ", ".join(f"{name}={count}" for name, count in rejection_counts.items() if count)
     suffix = f" ({rejection_text})" if rejection_text else ""
     return _empty_option_candidate(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed high-volume/high-OI, spread, DTE, and IV filters{suffix}",
+        f"No option passed high-volume/high-OI, spread, DTE, and IV filters{suffix}; same-week 5% OTM fallback unavailable",
     )
 
 

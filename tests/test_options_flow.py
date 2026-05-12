@@ -82,6 +82,54 @@ class FakeSelectionClient:
         return []
 
 
+class ThinSameWeekClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date", "2099-01-15")
+        contract_type = params.get("contract_type")
+        if contract_type == "put":
+            return [
+                {
+                    "details": {"ticker": "O:XYZTESTP00090000", "contract_type": "put", "strike_price": 90, "expiration_date": expiry},
+                    "last_quote": {"bid": 0.9, "ask": 1.1},
+                    "day": {"volume": 5},
+                    "open_interest": 10,
+                    "greeks": {"delta": -0.2},
+                    "implied_volatility": 0.5,
+                },
+                {
+                    "details": {"ticker": "O:XYZTESTP00095000", "contract_type": "put", "strike_price": 95, "expiration_date": expiry},
+                    "last_quote": {"bid": 1.4, "ask": 1.6},
+                    "day": {"volume": 1},
+                    "open_interest": 2,
+                    "greeks": {"delta": -0.3},
+                    "implied_volatility": 0.5,
+                },
+            ]
+        return [
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 1.4, "ask": 1.6},
+                "day": {"volume": 1},
+                "open_interest": 2,
+                "greeks": {"delta": 0.3},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": expiry},
+                "last_quote": {"bid": 0.9, "ask": 1.1},
+                "day": {"volume": 5},
+                "open_interest": 10,
+                "greeks": {"delta": 0.2},
+                "implied_volatility": 0.5,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class MissingOptionsClient:
     configured = False
 
@@ -351,6 +399,34 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].volume, 8000)
         self.assertEqual(candidates[0].open_interest, 25000)
+
+    def test_select_option_contract_defaults_to_same_week_five_percent_call_after_skip(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=ThinSameWeekClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZTESTC00105000")
+        self.assertEqual(candidate.strike, 105)
+        self.assertEqual(candidate.expiry, "2099-01-15")
+        self.assertIn("same-week +5% OTM CALL", candidate.reason)
+
+    def test_select_option_contract_defaults_to_same_week_five_percent_put_after_skip(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "PUT", "price": 100},
+                client=ThinSameWeekClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZTESTP00095000")
+        self.assertEqual(candidate.strike, 95)
+        self.assertEqual(candidate.expiry, "2099-01-15")
+        self.assertIn("same-week -5% OTM PUT", candidate.reason)
 
     def test_missing_api_key_returns_skip_report(self):
         report = analyze_options_flow("XYZ", "CALL", client=MissingOptionsClient())

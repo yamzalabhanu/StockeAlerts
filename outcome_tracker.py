@@ -8,6 +8,8 @@ client = RESTClient(POLYGON_API_KEY)
 
 OUTCOME_FILE = "alert_outcomes.csv"
 
+_outcome_tracking_disabled_reason = None
+
 
 def safe_float(v, default=0.0):
     try:
@@ -32,6 +34,28 @@ def _forecast_accuracy(expected_move_pct, realized_move_pct):
     return round(max(0.0, min(100.0, (1 - (error / expected)) * 100)), 2)
 
 
+def _is_polygon_not_authorized_error(error):
+    """Return True when Polygon rejects the requested data entitlement."""
+    text = str(error).lower()
+    return "not_authorized" in text or "doesn't include this data timeframe" in text
+
+
+def _disable_outcome_tracking(reason):
+    """Disable outcome tracking for this process after a plan entitlement failure."""
+    global _outcome_tracking_disabled_reason
+    if not _outcome_tracking_disabled_reason:
+        _outcome_tracking_disabled_reason = reason
+        print(f"Outcome tracking disabled for this run: {reason}")
+
+
+def _outcome_tracking_enabled():
+    return globals().get("ENABLE_OUTCOME_TRACKING", True)
+
+
+def _skip_unauthorized_outcomes():
+    return globals().get("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", True)
+
+
 def track_outcome(
     ticker,
     direction,
@@ -45,6 +69,12 @@ def track_outcome(
     setup_context=None,
     horizon_minutes=60,
 ):
+    if not _outcome_tracking_enabled():
+        return None
+
+    if _outcome_tracking_disabled_reason:
+        return None
+
     alert_time = dt.datetime.fromisoformat(alert_time_iso)
     end_time = alert_time + dt.timedelta(minutes=horizon_minutes)
     setup_context = setup_context or {}
@@ -63,7 +93,13 @@ def track_outcome(
             )
         )
     except Exception as e:
-        print(f"{ticker}: outcome fetch error {e}")
+        if _skip_unauthorized_outcomes() and _is_polygon_not_authorized_error(e):
+            _disable_outcome_tracking(
+                "Polygon API plan does not include the requested minute aggregate timeframe. "
+                "Set ENABLE_OUTCOME_TRACKING=false to skip outcome checks permanently or upgrade Polygon access."
+            )
+        else:
+            print(f"{ticker}: outcome fetch error {e}")
         return None
 
     target_hit = False

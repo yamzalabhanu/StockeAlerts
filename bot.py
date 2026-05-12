@@ -22,6 +22,7 @@ from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
 from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
+from option_order_manager import manage_open_option_positions, maybe_buy_recommended_option
 from alert_history import mark_alerted_today, was_alerted_today
 
 
@@ -550,6 +551,13 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
         self.send_telegram_msg(msg)
 
+        maybe_buy_recommended_option(
+            ticker=ticker,
+            direction=direction,
+            option_contract=option_contract or {},
+            telegram_sender=self.send_telegram_msg,
+        )
+
         mark_alerted_today(ticker)
 
         log_alert({
@@ -655,6 +663,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
         while True:
             try:
+                manage_open_option_positions(telegram_sender=self.send_telegram_msg)
+
                 if not self.is_regular_market_hours() or not self.is_quality_trading_window():
                     self.maybe_send_daily_learning_report()
                     print("⏸ Outside quality market window | sleeping 600s")

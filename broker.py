@@ -6,10 +6,17 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 PAPER = os.getenv("PAPER_TRADING", "true").lower() == "true"
 ENABLE_REAL_EXECUTION = os.getenv("ENABLE_REAL_EXECUTION", "false").lower() == "true"
 
-client = TradingClient(
-    api_key=os.getenv("ALPACA_API_KEY"),
-    secret_key=os.getenv("ALPACA_SECRET_KEY"),
-    paper=PAPER,
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+
+client = (
+    TradingClient(
+        api_key=ALPACA_API_KEY,
+        secret_key=ALPACA_SECRET_KEY,
+        paper=PAPER,
+    )
+    if ALPACA_API_KEY and ALPACA_SECRET_KEY
+    else None
 )
 
 
@@ -26,6 +33,8 @@ def place_trade(symbol, qty, side):
     allowed, reason = _execution_allowed()
     if not allowed:
         return reason
+    if client is None:
+        return "Trade failed: ALPACA_API_KEY and ALPACA_SECRET_KEY are required"
 
     order = MarketOrderRequest(
         symbol=symbol,
@@ -50,6 +59,8 @@ def place_option_limit_order(option_symbol: str, contracts: int, side: str, limi
     allowed, reason = _execution_allowed()
     if not allowed:
         return reason
+    if client is None:
+        return "Option order failed: ALPACA_API_KEY and ALPACA_SECRET_KEY are required"
 
     order = LimitOrderRequest(
         symbol=option_symbol,

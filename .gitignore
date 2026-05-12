@@ -7,3 +7,6 @@ __pycache__/
 
 # Runtime learning artifacts
 setup_performance_learning.json
+
+# Paper options automation state
+option_order_state.json

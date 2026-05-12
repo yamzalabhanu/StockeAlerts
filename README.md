@@ -832,6 +832,23 @@ MAX_OPTION_DTE=45
 - Dynamic position sizing
 - Stop/target automation
 
+
+### Paper Options Auto-Trading
+
+Recommended option contracts included in intraday and swing alerts can be submitted to Alpaca as paper limit orders. The bot tracks each opened contract and submits a paper sell when the option premium reaches the configured profit target or stop loss.
+
+Environment controls:
+
+- `PAPER_TRADING=true` keeps Alpaca in paper mode.
+- `AUTO_OPTION_PAPER_ONLY=true` blocks option automation if Alpaca is not in paper mode.
+- `ENABLE_AUTO_OPTION_TRADING=true` enables automated option buys from recommended contracts.
+- `OPTION_CONTRACT_QTY=1` sets the number of contracts per alert.
+- `OPTION_PROFIT_TARGET_PCT=20` submits the managed sell at +20% option P/L.
+- `OPTION_STOP_LOSS_PCT=-10` submits the managed sell at -10% option P/L.
+- `OPTION_ORDER_STATE_FILE=option_order_state.json` stores tracked paper option positions between scans.
+
+Telegram confirmations are sent for each paper buy submission, each paper sell submission, and any guardrail skip such as non-paper Alpaca mode.
+
 ## 📰 AI Sentiment Engine
 
 - News sentiment

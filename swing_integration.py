@@ -18,6 +18,7 @@ from setup_filters import PASS, REJECT, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from options_engine import analyze_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
+from option_order_manager import maybe_buy_recommended_option
 from alert_history import mark_alerted_today, was_alerted_today
 
 SWING_ALERT_CACHE = {}
@@ -255,6 +256,12 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
         message = format_swing_alert(ticker, setup)
         telegram_sent = bool(bot.send_telegram_msg(message))
         if telegram_sent:
+            maybe_buy_recommended_option(
+                ticker=ticker,
+                direction=setup.get("direction"),
+                option_contract=setup.get("option_contract") or {},
+                telegram_sender=bot.send_telegram_msg,
+            )
             SWING_ALERT_CACHE[ticker] = alert_time
             mark_alerted_today(ticker)
         else:

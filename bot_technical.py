@@ -489,20 +489,37 @@ class StockTechnicalBase:
         return grouped
 
     def timeframe_trend(self, bars):
-        if len(bars) < 21:
+        """Return trend without forcing a full 21 higher-timeframe candles.
+
+        A fixed EMA9/EMA21 requirement made the 15-minute trend stay NEUTRAL
+        until 21 completed 15-minute candles were available, which is roughly
+        2:45pm ET / 1:45pm CT.  During the morning session that prevented clean
+        ETF weakness/strength from contributing to alert scoring.  Use shorter
+        EMA pairs while the session is still young, then graduate to the normal
+        9/21 pair once enough bars exist.
+        """
+        if len(bars) < 6:
             return "NEUTRAL"
 
         closes = [safe_float(x["close"]) for x in bars]
-        ema9 = self.ema(closes, 9)
-        ema21 = self.ema(closes, 21)
 
-        if ema9 is None or ema21 is None:
+        if len(closes) >= 21:
+            fast_length, slow_length = 9, 21
+        elif len(closes) >= 12:
+            fast_length, slow_length = 5, 9
+        else:
+            fast_length, slow_length = 3, 5
+
+        ema_fast = self.ema(closes, fast_length)
+        ema_slow = self.ema(closes, slow_length)
+
+        if ema_fast is None or ema_slow is None:
             return "NEUTRAL"
 
-        if closes[-1] > ema9 > ema21:
+        if closes[-1] > ema_fast > ema_slow:
             return "BULLISH"
 
-        if closes[-1] < ema9 < ema21:
+        if closes[-1] < ema_fast < ema_slow:
             return "BEARISH"
 
         return "NEUTRAL"
@@ -826,6 +843,9 @@ class StockTechnicalBase:
                 "avg_20_volume": avg_20_volume,
                 "intraday_current_volume": current_volume,
                 "intraday_avg_20_volume": avg_20_volume,
+                "last_5_closes": [safe_float(x.close) for x in regular[-5:]],
+                "last_5_lows": [safe_float(x.low) for x in regular[-5:]],
+                "last_5_highs": [safe_float(x.high) for x in regular[-5:]],
                 "last_5_intraday_closes": [safe_float(x.close) for x in regular[-5:]],
                 "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
                 "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],

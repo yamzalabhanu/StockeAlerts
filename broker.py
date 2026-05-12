@@ -20,6 +20,19 @@ client = (
 )
 
 
+def normalize_option_symbol(option_symbol: str) -> str:
+    """Return an Alpaca-compatible OCC option symbol.
+
+    Polygon/Massive option tickers are commonly prefixed with ``O:``
+    (for example ``O:GLD260515C00457000``), while Alpaca order
+    requests expect the OCC symbol without that vendor prefix.
+    """
+    symbol = str(option_symbol or "").strip().upper()
+    if symbol.startswith("O:"):
+        symbol = symbol[2:]
+    return symbol
+
+
 def _execution_allowed():
     """Block live execution unless explicitly enabled."""
     if PAPER:
@@ -65,8 +78,12 @@ def place_option_limit_order(option_symbol: str, contracts: int, side: str, limi
     if client is None:
         return "Option order failed: ALPACA_API_KEY and ALPACA_SECRET_KEY are required"
 
+    alpaca_symbol = normalize_option_symbol(option_symbol)
+    if not alpaca_symbol:
+        return "Option order failed: option symbol is required"
+
     order = LimitOrderRequest(
-        symbol=option_symbol,
+        symbol=alpaca_symbol,
         qty=contracts,
         side=OrderSide.BUY if side.upper() == "BUY" else OrderSide.SELL,
         time_in_force=TimeInForce.DAY,

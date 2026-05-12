@@ -41,6 +41,47 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertTrue(any("take profit +20% / stop -10%" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-456")
+    def test_strips_polygon_option_prefix_before_buying(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={
+                "status": "OK",
+                "contract_symbol": "O:GLD260515C00457000",
+                "ask": 0.26,
+            },
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNotNone(position)
+        self.assertEqual(position.contract_symbol, "GLD260515C00457000")
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 0.26)
+        self.assertTrue(any("Contract: GLD260515C00457000" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch(
+        "option_order_manager.broker.place_option_limit_order",
+        return_value='Option order failed: {"code":42210000,"message":"asset not found"}',
+    )
+    def test_does_not_track_or_confirm_failed_option_buy(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={"status": "OK", "contract_symbol": "O:GLD260515C00457000", "ask": 0.26},
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 0.26)
+        state = manager._load_state(self.state_path)
+        self.assertEqual(state["positions"], {})
+        self.assertTrue(any("Alpaca paper BUY failed" in msg for msg in self.telegram_messages))
+        self.assertFalse(any("Alpaca paper BUY submitted" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
     @patch("option_order_manager.broker.place_option_limit_order", return_value="sell-order-123")
     def test_sells_open_option_at_profit_target_and_sends_confirmation(self, place_order):
         manager.maybe_buy_recommended_option(
@@ -86,6 +127,33 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["exit_reason"], "STOP_LOSS")
         place_order.assert_called_once_with("QQQ260515P00450000", 1, "SELL", 2.69)
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order", return_value="sell-order-789")
+    def test_sells_legacy_polygon_prefixed_state_with_alpaca_symbol(self, place_order):
+        state = {
+            "positions": {
+                "O:GLD260515C00457000": {
+                    "ticker": "GLD",
+                    "direction": "CALL",
+                    "contract_symbol": "O:GLD260515C00457000",
+                    "qty": 1,
+                    "entry_premium": 0.26,
+                    "status": "OPEN",
+                    "opened_at": "2026-05-12T00:00:00+00:00",
+                }
+            }
+        }
+        manager._save_state(state, self.state_path)
+
+        closed = manager.manage_open_option_positions(
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+            price_lookup={"GLD260515C00457000": 0.32},
+        )
+
+        self.assertEqual(len(closed), 1)
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "SELL", 0.32)
 
     @patch("option_order_manager.broker.PAPER", False)
     @patch("option_order_manager.broker.place_option_limit_order")

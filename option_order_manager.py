@@ -94,6 +94,11 @@ def _contract_dict(option_contract: Mapping[str, Any] | Any) -> dict[str, Any]:
     return dict(getattr(option_contract, "__dict__", {}) or {})
 
 
+def _order_response_failed(response: Any) -> bool:
+    text = str(response or "").strip().lower()
+    return text.startswith(("option order failed", "trade failed", "blocked:"))
+
+
 def maybe_buy_recommended_option(
     *,
     ticker: str,
@@ -112,7 +117,8 @@ def maybe_buy_recommended_option(
         _send(telegram_sender, f"🧾 Option buy skipped for {ticker}: {guard_reason}")
         return None
 
-    symbol = str(contract.get("contract_symbol") or "")
+    raw_symbol = str(contract.get("contract_symbol") or "")
+    symbol = broker.normalize_option_symbol(raw_symbol)
     limit_price = _safe_float(contract.get("ask") or contract.get("mid"))
     qty = OPTION_CONTRACT_QTY
     if not symbol or limit_price <= 0 or qty <= 0:
@@ -126,6 +132,17 @@ def maybe_buy_recommended_option(
         return None
 
     response = broker.place_option_limit_order(symbol, qty, "BUY", limit_price)
+    if _order_response_failed(response):
+        _send(
+            telegram_sender,
+            "❌ Alpaca paper BUY failed\n"
+            f"Ticker: {ticker} | Direction: {direction}\n"
+            f"Contract: {symbol}\n"
+            f"Qty: {qty} | Limit: ${limit_price:.2f}\n"
+            f"Broker response: {response}",
+        )
+        return None
+
     position = ManagedOptionPosition(
         ticker=ticker,
         direction=direction,
@@ -217,7 +234,8 @@ def manage_open_option_positions(
             continue
 
         entry = _safe_float(position.get("entry_premium"))
-        current = _safe_float(prices.get(symbol))
+        alpaca_symbol = broker.normalize_option_symbol(symbol)
+        current = _safe_float(prices.get(symbol) or prices.get(alpaca_symbol))
         qty = int(_safe_float(position.get("qty"), OPTION_CONTRACT_QTY))
         if entry <= 0 or current <= 0 or qty <= 0:
             continue
@@ -234,7 +252,7 @@ def manage_open_option_positions(
         if not exit_reason:
             continue
 
-        response = broker.place_option_limit_order(symbol, qty, "SELL", current)
+        response = broker.place_option_limit_order(alpaca_symbol, qty, "SELL", current)
         position.update(
             {
                 "status": "CLOSED",

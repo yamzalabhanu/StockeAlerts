@@ -45,6 +45,8 @@ MARKET_TZ = ZoneInfo("America/New_York")
 # --- ALERT MODES ---
 ENABLE_INTRADAY_ALERTS = True
 ENABLE_SWING_ALERTS = True
+ENABLE_OUTCOME_TRACKING = os.getenv("ENABLE_OUTCOME_TRACKING", "true").lower() == "true"
+OUTCOME_TRACKING_SKIP_UNAUTHORIZED = os.getenv("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", "true").lower() == "true"
 
 INTRADAY_MIN_SCORE = 85
 # High-quality intraday setups can pass with non-blocking WARNING states

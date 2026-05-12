@@ -141,7 +141,7 @@ def maybe_buy_recommended_option(
 
     _send(
         telegram_sender,
-        "✅ Alpaca paper BUY submitted\n"
+        "✅ Alpaca paper BUY submitted (DAY limit; queues after hours)\n"
         f"Ticker: {ticker} | Direction: {direction}\n"
         f"Contract: {symbol}\n"
         f"Qty: {qty} | Limit: ${limit_price:.2f}\n"

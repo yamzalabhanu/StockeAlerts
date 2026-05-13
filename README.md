@@ -878,6 +878,7 @@ AUTO_OPTION_PAPER_ONLY=true
 OPTION_CONTRACT_QTY=1
 OPTION_PROFIT_TARGET_PCT=20
 OPTION_STOP_LOSS_PCT=-10
+OPTION_PRICE_CHECK_INTERVAL_SEC=300
 OPTION_ORDER_STATE_FILE=option_order_state.json
 ```
 
@@ -909,7 +910,7 @@ OPTION_ORDER_STATE_FILE=option_order_state.json
 
 ### Paper Options Auto-Trading
 
-Recommended option contracts included in intraday and swing alerts can be submitted to Alpaca as paper limit orders. The bot tracks each opened contract and submits a paper sell when the option premium reaches the configured profit target or stop loss.
+Recommended option contracts included in intraday and swing alerts can be submitted to Alpaca as paper limit orders. The bot tracks each submitted contract price, refreshes the latest option premium every five minutes by default, and submits a paper sell when the premium reaches the configured profit target or stop loss.
 
 Environment controls:
 
@@ -919,6 +920,7 @@ Environment controls:
 - `OPTION_CONTRACT_QTY=1` sets the number of contracts per alert.
 - `OPTION_PROFIT_TARGET_PCT=20` submits the managed sell at +20% option P/L.
 - `OPTION_STOP_LOSS_PCT=-10` submits the managed sell at -10% option P/L.
+- `OPTION_PRICE_CHECK_INTERVAL_SEC=300` checks submitted option order prices every five minutes by default.
 - `OPTION_ORDER_STATE_FILE=option_order_state.json` stores tracked paper option positions between scans.
 
 Telegram confirmations are sent for each paper buy submission, each paper sell submission, and any guardrail skip such as non-paper Alpaca mode.

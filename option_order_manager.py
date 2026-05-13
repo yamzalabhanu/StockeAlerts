@@ -13,7 +13,7 @@ AUTO_OPTION_TRADING_ENABLED = os.getenv("ENABLE_AUTO_OPTION_TRADING", "true").lo
 AUTO_OPTION_PAPER_ONLY = os.getenv("AUTO_OPTION_PAPER_ONLY", "true").lower() == "true"
 OPTION_CONTRACT_QTY = int(os.getenv("OPTION_CONTRACT_QTY", "1"))
 OPTION_PROFIT_TARGET_PCT = float(os.getenv("OPTION_PROFIT_TARGET_PCT", "20"))
-OPTION_STOP_LOSS_PCT = float(os.getenv("OPTION_STOP_LOSS_PCT", "-10"))
+OPTION_STOP_LOSS_PCT = float(os.getenv("OPTION_STOP_LOSS_PCT", "-5"))
 OPTION_ORDER_STATE_FILE = Path(os.getenv("OPTION_ORDER_STATE_FILE", "option_order_state.json"))
 
 TelegramSender = Optional[Callable[[str], bool]]

@@ -427,6 +427,25 @@ class StockTechnicalBase:
         last = self.state[ticker]["last_alert_time"].get(direction)
         return last and time.time() - last < ALERT_COOLDOWN_SEC
 
+    def _early_session_cutoff(self):
+        try:
+            hour, minute = str(EARLY_SESSION_END_TIME).split(":", 1)
+            return dt.time(int(hour), int(minute))
+        except Exception:
+            return dt.time(10, 30)
+
+    def is_early_session_time(self, when=None):
+        if not EARLY_SESSION_GRACE_ENABLED:
+            return False
+
+        now = when or dt.datetime.now(MARKET_TZ)
+        if isinstance(now, dt.datetime):
+            now_time = now.astimezone(MARKET_TZ).time() if now.tzinfo else now.time()
+        else:
+            now_time = now
+
+        return dt.time(9, 30) <= now_time <= self._early_session_cutoff()
+
     def is_regular_market_hours(self):
         now = dt.datetime.now(MARKET_TZ)
         return dt.time(9, 30) <= now.time() <= dt.time(16, 0)
@@ -822,6 +841,11 @@ class StockTechnicalBase:
         price = safe_float(regular[-1].close)
 
         tech = dict(daily_tech)
+        latest_regular_ts = dt.datetime.fromtimestamp(
+            regular[-1].timestamp / 1000,
+            tz=dt.timezone.utc,
+        ).astimezone(MARKET_TZ)
+
         tech.update(
             {
                 "price": price,
@@ -843,6 +867,9 @@ class StockTechnicalBase:
                 "avg_20_volume": avg_20_volume,
                 "intraday_current_volume": current_volume,
                 "intraday_avg_20_volume": avg_20_volume,
+                "regular_bars_count": len(regular),
+                "latest_regular_time": latest_regular_ts.strftime("%H:%M"),
+                "early_session_setup": self.is_early_session_time(latest_regular_ts),
                 "last_5_closes": [safe_float(x.close) for x in regular[-5:]],
                 "last_5_lows": [safe_float(x.low) for x in regular[-5:]],
                 "last_5_highs": [safe_float(x.high) for x in regular[-5:]],

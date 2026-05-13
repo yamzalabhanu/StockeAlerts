@@ -14,13 +14,34 @@ from config import OPENAI_VISION_MODEL
 from openai_models import chat_completion_options
 
 from bot_utils import safe_float, safe_int
-from symbol_utils import is_valid_symbol, normalize_symbol, tradingview_symbol
+from symbol_utils import is_valid_symbol, normalize_symbol, tradingview_candidates
 
 CHART_DIR = Path("charts")
 CHART_DIR.mkdir(exist_ok=True)
 
 DEFAULT_VISION_MODEL = OPENAI_VISION_MODEL
 DEFAULT_VIEWPORT = {"width": 1440, "height": 1000}
+
+TRADINGVIEW_INVALID_MARKERS = (
+    "this symbol doesn't exist",
+    "invalid symbol",
+)
+
+
+def _tradingview_capture_candidates(raw_symbol: str, clean_symbol: str) -> list[str]:
+    candidates = tradingview_candidates(clean_symbol)
+    if ":" in str(raw_symbol):
+        exchange = str(raw_symbol).split(":", 1)[0].strip().upper()
+        explicit = f"{exchange}:{clean_symbol}"
+        candidates = [explicit, *[candidate for candidate in candidates if candidate != explicit]]
+    return candidates
+
+
+async def _page_has_invalid_symbol_error(page) -> bool:
+    body_text = (await page.locator("body").inner_text(timeout=3000)).lower()
+    return any(marker in body_text for marker in TRADINGVIEW_INVALID_MARKERS)
+
+
 VISION_FEATURES = (
     "failed_breakout",
     "compression",
@@ -473,20 +494,28 @@ async def capture_chart(symbol: str, timeframe: str = "D", filename: str | None 
     if not is_valid_symbol(clean_symbol):
         raise ValueError(f"Invalid symbol for chart capture: {symbol}")
 
-    tv_symbol = symbol if ":" in symbol else tradingview_symbol(clean_symbol)
-    clean_file_symbol = _safe_symbol_for_file(tv_symbol)
-    filename = filename or str(CHART_DIR / f"{clean_file_symbol}_{timeframe}.png")
-    url = f"https://www.tradingview.com/chart/?symbol={tv_symbol}&interval={timeframe}&theme=dark"
-
+    candidates = _tradingview_capture_candidates(symbol, clean_symbol)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport=DEFAULT_VIEWPORT, device_scale_factor=1)
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(8000)
-        await page.screenshot(path=str(filename), full_page=False)
+
+        attempted = []
+        for tv_symbol in candidates:
+            attempted.append(tv_symbol)
+            url = f"https://www.tradingview.com/chart/?symbol={tv_symbol}&interval={timeframe}&theme=dark"
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(4000)
+            if await _page_has_invalid_symbol_error(page):
+                continue
+            await page.wait_for_timeout(4000)
+            output_path = filename or str(CHART_DIR / f"{_safe_symbol_for_file(tv_symbol)}_{timeframe}.png")
+            await page.screenshot(path=str(output_path), full_page=False)
+            await browser.close()
+            return str(output_path)
+
         await browser.close()
 
-    return str(filename)
+    raise ValueError(f"TradingView could not load a valid chart for {symbol}; tried {', '.join(attempted)}")
 
 
 async def capture_multi_timeframe_charts(symbol: str, timeframes: Iterable[str] = ("1", "5", "15")) -> list[str]:

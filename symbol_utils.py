@@ -5,7 +5,7 @@ TV_EXCHANGE_OVERRIDES = {
     "SPY": "AMEX", "QQQ": "NASDAQ", "IWM": "AMEX", "DIA": "AMEX", "SMH": "NASDAQ",
     "SOXX": "NASDAQ", "ARKK": "AMEX", "TQQQ": "NASDAQ", "SQQQ": "NASDAQ",
     "USO": "AMEX", "XLF": "AMEX", "XLE": "AMEX", "XLK": "AMEX", "XLY": "AMEX",
-    "ORCL": "NYSE", "UBER": "NYSE", "NIO": "NYSE", "BA": "NYSE", "JPM": "NYSE",
+    "ORCL": "NYSE", "UBER": "NYSE", "NIO": "NYSE", "QBTS": "NYSE", "BA": "NYSE", "JPM": "NYSE",
     "BAC": "NYSE", "GS": "NYSE", "MS": "NYSE", "WFC": "NYSE", "XOM": "NYSE",
     "CVX": "NYSE", "OXY": "NYSE", "SLB": "NYSE", "FCX": "NYSE", "CLF": "NYSE",
     "LLY": "NYSE", "NVO": "NYSE", "UNH": "NYSE", "NKE": "NYSE", "MCD": "NYSE",

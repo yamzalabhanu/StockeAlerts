@@ -22,7 +22,11 @@ from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from daily_report_engine import send_daily_learning_report
 from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
-from option_order_manager import manage_open_option_positions, maybe_buy_recommended_option
+from option_order_manager import (
+    OPTION_PRICE_CHECK_INTERVAL_SEC,
+    manage_open_option_positions,
+    maybe_buy_recommended_option,
+)
 from alert_history import mark_alerted_today, was_alerted_today
 
 
@@ -657,6 +661,30 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             if outcome:
                 print(f"{ticker}: outcome={outcome['result']} max_gain={outcome['max_gain_pct']}% max_loss={outcome['max_loss_pct']}%")
 
+
+    def maybe_manage_option_positions(self, *, force=False):
+        now = dt.datetime.now(dt.timezone.utc)
+        last_check = getattr(self, "_last_option_management_check", None)
+        if (
+            not force
+            and last_check
+            and (now - last_check).total_seconds() < OPTION_PRICE_CHECK_INTERVAL_SEC
+        ):
+            return []
+
+        closed = manage_open_option_positions(telegram_sender=self.send_telegram_msg)
+        self._last_option_management_check = now
+        return closed
+
+    async def sleep_with_option_management(self, seconds):
+        remaining = max(0, float(seconds))
+        while remaining > 0:
+            chunk = min(remaining, max(1, OPTION_PRICE_CHECK_INTERVAL_SEC))
+            await asyncio.sleep(chunk)
+            remaining -= chunk
+            if remaining > 0:
+                self.maybe_manage_option_positions()
+
     def maybe_send_daily_learning_report(self):
         now = dt.datetime.now(dt.timezone.utc)
         if now.hour < 21:
@@ -678,12 +706,12 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
 
         while True:
             try:
-                manage_open_option_positions(telegram_sender=self.send_telegram_msg)
+                self.maybe_manage_option_positions()
 
                 if not self.is_regular_market_hours() or not self.is_quality_trading_window():
                     self.maybe_send_daily_learning_report()
                     print("⏸ Outside quality market window | sleeping 600s")
-                    await asyncio.sleep(600)
+                    await self.sleep_with_option_management(600)
                     continue
 
                 self.tickers = self.get_auto_watchlist()
@@ -711,8 +739,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     self.mark_alert(c["ticker"], c["setup"]["direction"])
 
                 print(f"✅ Scan complete | candidates={len(candidates)} | sent={len(selected)} | sleeping {SCAN_INTERVAL_SEC}s")
-                await asyncio.sleep(SCAN_INTERVAL_SEC)
+                await self.sleep_with_option_management(SCAN_INTERVAL_SEC)
             except Exception as e:
                 print(f"Scan loop error: {e}")
-                await asyncio.sleep(SCAN_INTERVAL_SEC)
+                await self.sleep_with_option_management(SCAN_INTERVAL_SEC)
 

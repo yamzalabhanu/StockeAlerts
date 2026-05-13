@@ -169,6 +169,7 @@ def apply_enhancements(bot_cls):
         print("🚀 Stock Technical AI Bot Running")
         while True:
             try:
+                self.maybe_manage_option_positions()
                 in_intraday_window = self.is_regular_market_hours() and self.is_quality_trading_window()
 
                 if not in_intraday_window:
@@ -176,7 +177,7 @@ def apply_enhancements(bot_cls):
 
                     if not ENABLE_SWING_ALERTS:
                         print("⏸ Outside quality market window | sleeping 600s")
-                        await asyncio.sleep(600)
+                        await self.sleep_with_option_management(600)
                         continue
 
                     print("⏳ Outside intraday quality window | running swing scan")
@@ -240,10 +241,10 @@ def apply_enhancements(bot_cls):
                     f"swing_candidates={len(swing_candidates)} | intraday_sent={sent} | "
                     f"swing_sent={swing_sent} | per_scan_cap={scan_alert_cap} | sleeping {sleep_for}s"
                 )
-                await asyncio.sleep(sleep_for)
+                await self.sleep_with_option_management(sleep_for)
             except Exception as e:
                 print(f"Scan loop error: {e}")
-                await asyncio.sleep(SCAN_INTERVAL_SEC)
+                await self.sleep_with_option_management(SCAN_INTERVAL_SEC)
 
     bot_cls.detect_entry_mode = enhanced_detect_entry_mode
     bot_cls.build_candidate = enhanced_build_candidate

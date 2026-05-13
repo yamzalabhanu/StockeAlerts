@@ -14,6 +14,7 @@ AUTO_OPTION_PAPER_ONLY = os.getenv("AUTO_OPTION_PAPER_ONLY", "true").lower() == 
 OPTION_CONTRACT_QTY = int(os.getenv("OPTION_CONTRACT_QTY", "1"))
 OPTION_PROFIT_TARGET_PCT = float(os.getenv("OPTION_PROFIT_TARGET_PCT", "20"))
 OPTION_STOP_LOSS_PCT = float(os.getenv("OPTION_STOP_LOSS_PCT", "-10"))
+OPTION_PRICE_CHECK_INTERVAL_SEC = int(os.getenv("OPTION_PRICE_CHECK_INTERVAL_SEC", "300"))
 OPTION_ORDER_STATE_FILE = Path(os.getenv("OPTION_ORDER_STATE_FILE", "option_order_state.json"))
 
 TelegramSender = Optional[Callable[[str], bool]]
@@ -29,6 +30,9 @@ class ManagedOptionPosition:
     status: str
     opened_at: str
     last_order_response: str = ""
+    submitted_price: Optional[float] = None
+    current_premium: Optional[float] = None
+    last_checked_at: Optional[str] = None
     last_pnl_pct: Optional[float] = None
     closed_at: Optional[str] = None
     exit_premium: Optional[float] = None
@@ -152,6 +156,7 @@ def maybe_buy_recommended_option(
         status="OPEN",
         opened_at=_now_iso(),
         last_order_response=str(response),
+        submitted_price=limit_price,
     )
     state.setdefault("positions", {})[symbol] = asdict(position)
     _save_state(state, state_path)
@@ -162,7 +167,9 @@ def maybe_buy_recommended_option(
         f"Ticker: {ticker} | Direction: {direction}\n"
         f"Contract: {symbol}\n"
         f"Qty: {qty} | Limit: ${limit_price:.2f}\n"
-        f"Exit plan: take profit +{OPTION_PROFIT_TARGET_PCT:.0f}% / stop {OPTION_STOP_LOSS_PCT:.0f}%\n"
+        f"Submitted price tracked: ${limit_price:.2f}\n"
+        f"Exit plan: check every {OPTION_PRICE_CHECK_INTERVAL_SEC // 60} min; "
+        f"take profit +{OPTION_PROFIT_TARGET_PCT:.0f}% / stop {OPTION_STOP_LOSS_PCT:.0f}%\n"
         f"Broker response: {response}",
     )
     return position
@@ -215,7 +222,7 @@ def manage_open_option_positions(
     state_path: Path = OPTION_ORDER_STATE_FILE,
     price_lookup: Optional[Mapping[str, float]] = None,
 ) -> list[dict[str, Any]]:
-    """Sell tracked paper option positions at +20% profit or -10% loss."""
+    """Check tracked paper option prices and sell at +20% profit or -10% loss."""
     allowed, guard_reason = _trading_guard()
     if not allowed:
         print(f"Option position management skipped: {guard_reason}")
@@ -241,6 +248,8 @@ def manage_open_option_positions(
             continue
 
         pnl_pct = ((current - entry) / entry) * 100
+        position["current_premium"] = round(current, 2)
+        position["last_checked_at"] = _now_iso()
         position["last_pnl_pct"] = round(pnl_pct, 2)
 
         exit_reason = None
@@ -253,6 +262,19 @@ def manage_open_option_positions(
             continue
 
         response = broker.place_option_limit_order(alpaca_symbol, qty, "SELL", current)
+        if _order_response_failed(response):
+            position["exit_order_response"] = str(response)
+            _send(
+                telegram_sender,
+                "❌ Alpaca paper SELL failed; position remains tracked as OPEN\n"
+                f"Ticker: {position.get('ticker')} | Reason: {exit_reason}\n"
+                f"Contract: {symbol}\n"
+                f"Qty: {qty} | Limit: ${current:.2f}\n"
+                f"P/L: {pnl_pct:+.2f}% (entry ${entry:.2f})\n"
+                f"Broker response: {response}",
+            )
+            continue
+
         position.update(
             {
                 "status": "CLOSED",

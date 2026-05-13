@@ -662,6 +662,7 @@ class StockTechnicalBase:
         prev = daily[-2] if len(daily) >= 2 else None
         prev_high = safe_float(prev.high) if prev else None
         prev_low = safe_float(prev.low) if prev else None
+        prev_close = safe_float(prev.close) if prev else None
 
         last_20_daily = daily[-20:] if len(daily) >= 20 else daily
         recent_high = (
@@ -720,6 +721,7 @@ class StockTechnicalBase:
             "premarket_low": None,
             "prev_high": prev_high,
             "prev_low": prev_low,
+            "prev_close": prev_close,
             "recent_high": recent_high,
             "recent_low": recent_low,
             "previous_recent_high": prev_high,
@@ -737,6 +739,162 @@ class StockTechnicalBase:
             "intraday_available": False,
         }
 
+    def extended_hours_bias(self, tech):
+        """Return directional bias from after-hours/pre-market price discovery."""
+        if not EXTENDED_HOURS_BIAS_ENABLED:
+            return "NEUTRAL", 0, "extended-hours bias disabled"
+
+        score = int(tech.get("extended_bias_score") or 0)
+        if score > 0:
+            return (
+                "BULLISH",
+                score,
+                tech.get("extended_bias_reason", "extended-hours bullish"),
+            )
+        if score < 0:
+            return (
+                "BEARISH",
+                abs(score),
+                tech.get("extended_bias_reason", "extended-hours bearish"),
+            )
+        return "NEUTRAL", 0, tech.get("extended_bias_reason", "extended-hours neutral")
+
+    def _extended_session_context(
+        self, afterhours, premarket, price, prev_close, prev_high=None, prev_low=None
+    ):
+        """Summarize after-hours + pre-market action for early-session scoring.
+
+        Polygon minute aggregates include extended hours when the account is entitled.
+        This context lets early alerts use overnight price discovery, gap direction,
+        extended-hours VWAP/EMA alignment, volume, and prior-day level breaks before
+        a full regular-session intraday trend sample exists.
+        """
+        empty = {
+            "afterhours_high": None,
+            "afterhours_low": None,
+            "afterhours_close": None,
+            "afterhours_volume": 0.0,
+            "premarket_volume": 0.0,
+            "extended_hours_volume": 0.0,
+            "extended_hours_high": None,
+            "extended_hours_low": None,
+            "extended_hours_close": None,
+            "extended_hours_vwap": None,
+            "extended_hours_ema9": None,
+            "extended_hours_ema21": None,
+            "extended_hours_change_pct": None,
+            "extended_bias": "NEUTRAL",
+            "extended_bias_score": 0,
+            "extended_bias_reason": "no extended-hours bars available",
+        }
+
+        bars = list(afterhours or []) + list(premarket or [])
+        if not bars:
+            return empty
+
+        closes = [safe_float(x.close) for x in bars if x.close is not None]
+        highs = [safe_float(x.high) for x in bars if x.high is not None]
+        lows = [safe_float(x.low) for x in bars if x.low is not None]
+        volumes = [safe_float(x.volume) for x in bars if x.volume is not None]
+
+        if not closes:
+            return empty
+
+        total_pv = 0.0
+        total_vol = 0.0
+        for bar in bars:
+            volume = safe_float(bar.volume)
+            typical = (
+                safe_float(bar.high) + safe_float(bar.low) + safe_float(bar.close)
+            ) / 3
+            total_pv += typical * volume
+            total_vol += volume
+
+        ext_close = closes[-1]
+        ext_vwap = total_pv / total_vol if total_vol > 0 else None
+        ext_ema9 = self.ema(closes, min(9, len(closes))) if len(closes) >= 3 else None
+        ext_ema21 = self.ema(closes, min(21, len(closes))) if len(closes) >= 5 else None
+        change_pct = pct_diff(ext_close, prev_close) if prev_close else None
+
+        bull = 0
+        bear = 0
+        reasons = []
+
+        if change_pct is not None:
+            if change_pct >= EXTENDED_HOURS_MIN_MOVE_PCT:
+                bull += 2
+                reasons.append(f"gap/extended move +{change_pct:.2f}%")
+            elif change_pct <= -EXTENDED_HOURS_MIN_MOVE_PCT:
+                bear += 2
+                reasons.append(f"gap/extended move {change_pct:.2f}%")
+
+        if ext_vwap:
+            if ext_close > ext_vwap:
+                bull += 1
+                reasons.append("extended close above extended VWAP")
+            elif ext_close < ext_vwap:
+                bear += 1
+                reasons.append("extended close below extended VWAP")
+
+        if ext_ema9 and ext_ema21:
+            if ext_close > ext_ema9 >= ext_ema21:
+                bull += 1
+                reasons.append("extended EMA alignment bullish")
+            elif ext_close < ext_ema9 <= ext_ema21:
+                bear += 1
+                reasons.append("extended EMA alignment bearish")
+
+        if prev_high and price > prev_high:
+            bull += 1
+            reasons.append("regular price above previous-day high")
+        if prev_low and price < prev_low:
+            bear += 1
+            reasons.append("regular price below previous-day low")
+
+        if total_vol >= EXTENDED_HOURS_MIN_VOLUME:
+            if bull > bear:
+                bull += 1
+            elif bear > bull:
+                bear += 1
+            reasons.append(f"extended volume {int(total_vol):,}")
+
+        if bull > bear:
+            bias = "BULLISH"
+            bias_score = bull - bear
+        elif bear > bull:
+            bias = "BEARISH"
+            bias_score = -(bear - bull)
+        else:
+            bias = "NEUTRAL"
+            bias_score = 0
+
+        return {
+            "afterhours_high": max(
+                [safe_float(x.high) for x in afterhours], default=None
+            ),
+            "afterhours_low": min(
+                [safe_float(x.low) for x in afterhours], default=None
+            ),
+            "afterhours_close": (
+                safe_float(afterhours[-1].close) if afterhours else None
+            ),
+            "afterhours_volume": sum(safe_float(x.volume) for x in afterhours),
+            "premarket_volume": sum(safe_float(x.volume) for x in premarket),
+            "extended_hours_volume": total_vol,
+            "extended_hours_high": max(highs) if highs else None,
+            "extended_hours_low": min(lows) if lows else None,
+            "extended_hours_close": ext_close,
+            "extended_hours_vwap": ext_vwap,
+            "extended_hours_ema9": ext_ema9,
+            "extended_hours_ema21": ext_ema21,
+            "extended_hours_change_pct": change_pct,
+            "extended_bias": bias,
+            "extended_bias_score": bias_score,
+            "extended_bias_reason": (
+                "; ".join(reasons) if reasons else "extended-hours neutral"
+            ),
+        }
+
     def get_technical_context(self, ticker):
         now_ts = time.time()
 
@@ -746,7 +904,8 @@ class StockTechnicalBase:
         day = self.get_latest_trading_day()
 
         daily = self.get_aggs(ticker, 1, "day", day - dt.timedelta(days=330), day)
-        minute = self.get_aggs(ticker, 1, "minute", day, day)
+        minute_start = self._previous_trading_day(day)
+        minute = self.get_aggs(ticker, 1, "minute", minute_start, day)
 
         if not daily:
             print(f"{ticker}: no daily data")
@@ -765,6 +924,8 @@ class StockTechnicalBase:
 
         regular = []
         premarket = []
+        afterhours = []
+        previous_day = self._previous_trading_day(day)
 
         for bar in minute:
             ts = dt.datetime.fromtimestamp(
@@ -774,10 +935,13 @@ class StockTechnicalBase:
 
             t = ts.time()
 
-            if dt.time(4, 0) <= t < dt.time(9, 30):
+            if ts.date() == day and dt.time(4, 0) <= t < dt.time(9, 30):
                 premarket.append(bar)
 
-            if dt.time(9, 30) <= t <= dt.time(16, 0):
+            if ts.date() == previous_day and dt.time(16, 0) <= t <= dt.time(20, 0):
+                afterhours.append(bar)
+
+            if ts.date() == day and dt.time(9, 30) <= t <= dt.time(16, 0):
                 regular.append(bar)
 
         if not regular:
@@ -839,6 +1003,14 @@ class StockTechnicalBase:
         trend_15m = self.timeframe_trend(bars_15m)
 
         price = safe_float(regular[-1].close)
+        extended_context = self._extended_session_context(
+            afterhours,
+            premarket,
+            price,
+            daily_tech.get("prev_close"),
+            daily_tech.get("prev_high"),
+            daily_tech.get("prev_low"),
+        )
 
         tech = dict(daily_tech)
         latest_regular_ts = dt.datetime.fromtimestamp(
@@ -859,6 +1031,9 @@ class StockTechnicalBase:
                 "orb_low": orb_low,
                 "premarket_high": pm_high,
                 "premarket_low": pm_low,
+                "premarket_close": (
+                    safe_float(premarket[-1].close) if premarket else None
+                ),
                 "recent_high": recent_high,
                 "recent_low": recent_low,
                 "previous_recent_high": previous_recent_high,
@@ -877,6 +1052,7 @@ class StockTechnicalBase:
                 "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
                 "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],
                 "intraday_available": True,
+                **extended_context,
             }
         )
 
@@ -1170,6 +1346,12 @@ class StockTechnicalBase:
             if tech["prev_low"] and price < tech["prev_low"]:
                 bear += 1
 
+            extended_bias = tech.get("extended_bias")
+            if extended_bias == "BULLISH":
+                bull += 1
+            elif extended_bias == "BEARISH":
+                bear += 1
+
             if bull > bear:
                 bullish += 1
                 details.append(f"{ticker}: bullish")
@@ -1331,6 +1513,17 @@ class StockTechnicalBase:
         elif REQUIRE_MARKET_BIAS:
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias neutral, CALL deprioritized")
+
+        extended_bias, extended_strength, extended_reason = self.extended_hours_bias(
+            tech
+        )
+        if extended_bias == "BULLISH":
+            bonus = EXTENDED_HOURS_BIAS_WEIGHT + min(extended_strength, 4)
+            score += bonus
+            reasons.append("extended-hours bias bullish: " + extended_reason)
+        elif extended_bias == "BEARISH":
+            score -= EXTENDED_HOURS_CONFLICT_PENALTY
+            reasons.append("extended-hours bias against CALLs: " + extended_reason)
 
         if self.call_above_pm_or_pd_high(tech):
             score += A_PLUS_BREAKOUT_BONUS
@@ -1494,6 +1687,17 @@ class StockTechnicalBase:
         elif REQUIRE_MARKET_BIAS:
             score -= MARKET_BIAS_WEIGHT
             reasons.append("market bias neutral, PUT deprioritized")
+
+        extended_bias, extended_strength, extended_reason = self.extended_hours_bias(
+            tech
+        )
+        if extended_bias == "BEARISH":
+            bonus = EXTENDED_HOURS_BIAS_WEIGHT + min(extended_strength, 4)
+            score += bonus
+            reasons.append("extended-hours bias bearish: " + extended_reason)
+        elif extended_bias == "BULLISH":
+            score -= EXTENDED_HOURS_CONFLICT_PENALTY
+            reasons.append("extended-hours bias against PUTs: " + extended_reason)
 
         if self.put_below_pm_or_pd_low(tech):
             score += A_PLUS_BREAKOUT_BONUS

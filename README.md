@@ -106,7 +106,7 @@ Key controls include:
 
 ### 👁️ AI Vision Chart Reader
 
-StockeAlerts can capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read. The normalized visual reading can be attached to `tech["vision_chart"]` so chart-structure scoring, swing validation, and AI reasoning gates can account for visual context that numeric indicators often miss.
+StockeAlerts can capture TradingView screenshots and send the chart image to OpenAI Vision for a discretionary candle-structure read. The normalized visual reading can be attached to `tech["vision_chart"]` so chart-structure scoring, swing validation, and AI reasoning gates can account for visual context that numeric indicators often miss. The intraday prompt now forces an options-entry verdict of `A+ CALL`, `A+ PUT`, `WAIT`, or `REJECT` and avoids chasing breakouts already extended more than 1.5 ATR without a clean retest.
 
 The vision reader evaluates:
 
@@ -117,13 +117,23 @@ The vision reader evaluates:
 - Trapped longs / trapped shorts
 - Liquidity grabs above resistance or below support
 - Overall trend quality: strong, healthy, mixed, choppy, or exhausted
+- Market phase classification, retest confirmation, ETF alignment (`SPY`/`QQQ`/`SMH`/`VIX`), volume confirmation, and risk/reward viability
+- ORB, premarket high/low, and previous-day high/low levels supplied in the technical context
+- Multi-timeframe 1m/5m/15m screenshot stacks plus up to three prior screenshots for sequence memory
 
 Example:
 
 ```python
-from chart_ai import analyze_chart_vision
+from chart_ai import analyze_chart_vision, capture_multi_timeframe_charts
 
-vision = await analyze_chart_vision("NASDAQ:NVDA", analysis=tech, timeframe="D")
+image_paths = await capture_multi_timeframe_charts("NASDAQ:NVDA", timeframes=("1", "5", "15"))
+vision = await analyze_chart_vision(
+    "NASDAQ:NVDA",
+    analysis=tech,
+    timeframe="1/5/15",
+    image_paths=image_paths,
+    screenshot_sequence=prior_three_chart_paths,
+)
 tech["vision_chart"] = vision
 ```
 

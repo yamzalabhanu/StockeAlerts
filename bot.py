@@ -306,8 +306,16 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             return False, "AI sees late breakout risk"
         if ai.get("verdict") == "BUY" and confidence >= MIN_AI_CONFIDENCE:
             return True, "AI approved"
-        if score >= MIN_SCORE and confirmations >= 3 and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
-            return True, "override: high-quality intraday setup with confirmation"
+
+        high_quality_score = MIN_SCORE
+        required_confirmations = 3
+        if bool(setup.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED:
+            high_quality_score = max(0, MIN_SCORE - EARLY_SESSION_MIN_SCORE_BUFFER)
+            required_confirmations = min(required_confirmations, EARLY_SESSION_MIN_CONFIRMATIONS)
+
+        if score >= high_quality_score and confirmations >= required_confirmations and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
+            reason = "early-session high-quality intraday setup with confirmation" if high_quality_score < MIN_SCORE else "high-quality intraday setup with confirmation"
+            return True, f"override: {reason}"
         return False, ai.get("reason", "AI did not approve")
 
     async def build_candidate(self, ticker):
@@ -322,7 +330,14 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         call = self.apply_ai_scoring(ticker, tech, self.score_call_setup(tech))
         put = self.apply_ai_scoring(ticker, tech, self.score_put_setup(tech))
         best = call if call["score"] >= put["score"] else put
+        early_session_setup = bool(tech.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED
+        best["early_session_setup"] = early_session_setup
         min_score = MIN_CALL_SCORE if best["direction"] == "CALL" else MIN_PUT_SCORE
+        if early_session_setup:
+            min_score = max(0, min_score - EARLY_SESSION_MIN_SCORE_BUFFER)
+            best.setdefault("reasons", []).append(
+                f"early-session grace active: candidate score floor reduced by {EARLY_SESSION_MIN_SCORE_BUFFER}"
+            )
 
         print(
             f"{ticker}: price={fmt_price(tech['price'])}, "

@@ -1,4 +1,5 @@
 from bot_utils import safe_float
+from config import EARLY_SESSION_GRACE_ENABLED
 
 REJECT = 'REJECT'
 WARNING = 'WARNING'
@@ -68,10 +69,14 @@ def evaluate_setup_quality(tech: dict, direction: str) -> dict:
         score -= 15
         warnings.append('Breakout directly into resistance')
 
+    early_session = bool(tech.get('early_session_setup')) and EARLY_SESSION_GRACE_ENABLED
+
     if score >= 25:
         status = PASS
-    elif score >= 5:
+    elif score >= 5 or early_session:
         status = WARNING
+        if early_session and score < 5:
+            warnings.append('Early-session setup structure still forming')
     else:
         status = REJECT
 

@@ -210,6 +210,15 @@ MIN_CALL_SCORE = 75
 MIN_PUT_SCORE = 75
 MIN_AI_CONFIDENCE = 75
 
+# Early-session setups often form before a full sample of intraday volume,
+# retest, and liquidity data is available. These controls keep valid opening
+# drive trades in the candidate pool while preserving the final AI/RR gate.
+EARLY_SESSION_GRACE_ENABLED = os.getenv("EARLY_SESSION_GRACE_ENABLED", "true").lower() == "true"
+EARLY_SESSION_END_TIME = os.getenv("EARLY_SESSION_END_TIME", "10:30")
+EARLY_SESSION_MIN_SCORE_BUFFER = int(os.getenv("EARLY_SESSION_MIN_SCORE_BUFFER", "10"))
+EARLY_SESSION_MIN_CONFIRMATIONS = int(os.getenv("EARLY_SESSION_MIN_CONFIRMATIONS", "2"))
+EARLY_SESSION_REL_VOLUME_MIN = float(os.getenv("EARLY_SESSION_REL_VOLUME_MIN", "1.0"))
+
 MAX_EXTENSION_FROM_VWAP_PCT = 2.5
 MAX_EXTENSION_FROM_ORB_PCT = 1.5
 RETEST_TOLERANCE_PCT = 0.35

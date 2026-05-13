@@ -38,7 +38,11 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertIsNotNone(position)
         place_order.assert_called_once_with("SPY260515C00500000", 1, "BUY", 2.5)
         self.assertTrue(any("Alpaca paper BUY submitted" in msg for msg in self.telegram_messages))
-        self.assertTrue(any("take profit +20% / stop -10%" in msg for msg in self.telegram_messages))
+        state = manager._load_state(self.state_path)
+        tracked = state["positions"]["SPY260515C00500000"]
+        self.assertEqual(tracked["submitted_price"], 2.5)
+        self.assertTrue(any("Submitted price tracked: $2.50" in msg for msg in self.telegram_messages))
+        self.assertTrue(any("check every 5 min; take profit +20% / stop -10%" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
     @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-456")
@@ -102,6 +106,9 @@ class OptionOrderManagerTests(unittest.TestCase):
 
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["exit_reason"], "TAKE_PROFIT")
+        self.assertEqual(closed[0]["current_premium"], 2.42)
+        self.assertEqual(closed[0]["last_pnl_pct"], 21.0)
+        self.assertIsNotNone(closed[0]["last_checked_at"])
         place_order.assert_called_once_with("SPY260515C00500000", 1, "SELL", 2.42)
         self.assertTrue(any("Alpaca paper SELL submitted" in msg for msg in self.telegram_messages))
         self.assertTrue(any("P/L: +21.00%" in msg for msg in self.telegram_messages))
@@ -154,6 +161,36 @@ class OptionOrderManagerTests(unittest.TestCase):
 
         self.assertEqual(len(closed), 1)
         place_order.assert_called_once_with("GLD260515C00457000", 1, "SELL", 0.32)
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch(
+        "option_order_manager.broker.place_option_limit_order",
+        side_effect=["buy-order-999", "Option order failed: insufficient qty"],
+    )
+    def test_keeps_position_open_when_managed_sell_fails(self, place_order):
+        manager.maybe_buy_recommended_option(
+            ticker="IWM",
+            direction="CALL",
+            option_contract={"status": "OK", "contract_symbol": "IWM260515C00200000", "ask": 1.0},
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+        self.telegram_messages.clear()
+
+        closed = manager.manage_open_option_positions(
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+            price_lookup={"IWM260515C00200000": 1.21},
+        )
+
+        self.assertEqual(closed, [])
+        self.assertEqual(place_order.call_count, 2)
+        state = manager._load_state(self.state_path)
+        tracked = state["positions"]["IWM260515C00200000"]
+        self.assertEqual(tracked["status"], "OPEN")
+        self.assertEqual(tracked["current_premium"], 1.21)
+        self.assertEqual(tracked["last_pnl_pct"], 21.0)
+        self.assertTrue(any("SELL failed; position remains tracked as OPEN" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", False)
     @patch("option_order_manager.broker.place_option_limit_order")

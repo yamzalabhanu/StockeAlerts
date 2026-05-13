@@ -8,6 +8,30 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧬 Swing Quality Blend + Relaxed Benchmark Gate
+
+Swing scoring now blends classic trend/momentum checks with institutional-style price-action evidence before a candidate reaches AI reasoning. The scorer can add or subtract weight for HH/HL or LH/LL structure, 9/21/50 EMA stage alignment, pivot/base breakouts or breakdowns, volume dry-up during bases, VCP contraction, retest holds/rejections, gap intent, ATR extension risk, and failed reclaim/rejection behavior. This gives pullback, breakout, and breakdown swings a richer score than simple moving-average alignment alone.
+
+The swing benchmark gate has also been tuned from an elite-only hard stop into a high-quality blended gate. It can now accept `A+` or `A` reasoning decisions, requires an `88` composite score and at least `1.8R`, allows `GOOD` or `WARNING` execution quality, allows `ELITE` or `GOOD` chart structure, and permits mixed-regime exceptions only for perfect-score `A+` setups. The gate still logs every miss so skipped swing candidates remain auditable.
+
+Key benchmark defaults include:
+
+| Setting | Purpose |
+|---|---|
+| `SWING_MIN_COMPOSITE_SCORE=88` | Minimum final AI/composite score for benchmark-quality swing alerts |
+| `SWING_MIN_BENCHMARK_RR=1.8` | Minimum risk/reward accepted by the swing benchmark gate |
+| `SWING_ALLOWED_DECISIONS=A+/A` | AI reasoning decisions eligible for swing alerts |
+| `SWING_ALLOWED_CHART_STRUCTURES=ELITE/GOOD` | Vision chart grades accepted by the benchmark gate |
+| `SWING_MIXED_REGIME_ELITE_SCORE=100` | Mixed-regime exception reserved for perfect-score `A+` swing setups |
+
+---
+
+### 🖼️ TradingView Chart Capture Symbol Fallbacks
+
+Chart capture and AI vision now normalize symbols before opening TradingView and try a prioritized list of exchange-prefixed candidates (`NASDAQ`, `NYSE`, `AMEX`, plus ETF and NYSE overrides). If TradingView reports that a symbol is invalid, the capture layer automatically tries the next candidate before failing. This improves chart screenshots for NYSE names, ETFs, aliases such as `NASDAQ:ORCL`, and symbols that require exchange-specific TradingView routing.
+
+---
+
 ### 🧭 Expanded Master Watchlist + Stricter Quality Windows
 
 The scan universe now keeps the curated `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` tiers, while also documenting the expanded `MASTER_WATCHLIST` used to track liquid ETFs, leveraged products, AI/semiconductor leaders, big tech, high-beta crypto/fintech names, biotech, energy, industrials, retail, travel, and other active movers. Intraday quality windows were tightened to the highest-opportunity parts of the day (`08:30-11:30` and `13:30-14:59` ET), and the default intraday alert threshold is now `95` so the ranked-alert flow favors cleaner A+ setups.
@@ -39,9 +63,9 @@ Key controls include:
 
 ---
 
-### 🏆 Elite-Only Swing Benchmark Gate
+### 🏆 High-Quality Swing Benchmark Gate
 
-Swing alerts now use a stricter benchmark profile for top-tier swing trades. The benchmark requires an `A+` reasoning decision, a `100` composite score, at least `2R` risk/reward, directional regime alignment, acceptable execution quality, good/strong multi-timeframe alignment, and `ELITE` chart structure. The gate logs explicit rejection reasons for missed score, risk/reward, regime, execution, multi-timeframe, chart-structure, or AI-risk requirements so skipped candidates are easier to audit.
+Swing alerts now use a blended benchmark profile for high-quality swing trades. The benchmark accepts only `A+` or `A` reasoning decisions, an `88+` composite score, at least `1.8R` risk/reward, directional regime alignment or an elite mixed-regime exception, acceptable execution quality, good/strong multi-timeframe alignment, and `ELITE` or `GOOD` chart structure. The gate logs explicit rejection reasons for missed score, risk/reward, regime, execution, multi-timeframe, chart-structure, or AI-risk requirements so skipped candidates are easier to audit.
 
 ---
 
@@ -203,7 +227,7 @@ This makes after-hours, weekend, and sparse-intraday swing scans more reliable.
 
 ### 🏆 Swing Benchmark Gate
 
-Swing candidates now pass through a benchmark gate after the AI reasoning report is generated. The benchmark now accepts only elite `A+` setups with a `100` composite score, at least `2R` risk/reward, aligned trend/regime context, acceptable execution quality, good/strong multi-timeframe structure, `ELITE` chart structure, and no blocking AI reject risks. Rejected candidates log explicit reasons such as score, risk/reward, regime, execution, MTF, or chart-structure misses.
+Swing candidates now pass through a benchmark gate after the AI reasoning report is generated. The benchmark accepts high-quality `A+` or `A` setups with an `88+` composite score, at least `1.8R` risk/reward, aligned trend/regime context or a perfect-score mixed-regime exception, acceptable execution quality, good/strong multi-timeframe structure, `ELITE` or `GOOD` chart structure, and no blocking AI reject risks. Rejected candidates log explicit reasons such as score, risk/reward, regime, execution, MTF, chart-structure, or AI-risk misses.
 
 Outcome tracking now uses the full swing hold window: a displayed range like `2-10 days` is converted to the maximum horizon so the trade has the complete advertised period to reach its stop or target.
 
@@ -510,17 +534,31 @@ When intraday data is unavailable, the scanner can still evaluate swing setups f
 - Current volume, 20-day average volume, and relative volume
 - Daily and weekly trend state
 
+## Institutional Swing Price-Action Inputs
+
+The swing scorer also evaluates institutional-style price-action context:
+
+- HH/HL or LH/LL market-structure stages
+- 9/21/50 EMA stage alignment
+- Pivot/base breakouts and breakdowns
+- Volume dry-up during bases
+- VCP volatility contraction
+- Breakout retest holds and breakdown retest rejections
+- Bullish or bearish gap intent with relative-volume confirmation
+- ATR extension and late-breakout risk
+- Failed reclaim / rejection at key levels
+
 ## Swing Quality Benchmark
 
 Before a swing alert is sent, the benchmark layer validates:
 
-- `A+` reasoning decision
-- `100` composite score minimum
-- At least `2R` risk/reward
-- Directional market-regime alignment, including elite mixed-regime handling
+- `A+` or `A` reasoning decision
+- `88` composite score minimum
+- At least `1.8R` risk/reward
+- Directional market-regime alignment, with a mixed-regime exception only for perfect-score `A+` setups
 - GOOD/WARNING execution quality
-- PASS/WARNING/REJECT setup-quality status when other elite requirements still pass
-- `ELITE` chart-structure quality
+- PASS/WARNING/REJECT setup-quality status when other benchmark requirements still pass
+- `ELITE` or `GOOD` chart-structure quality
 - GOOD/STRONG multi-timeframe alignment
 - No blocking AI reject reasons
 

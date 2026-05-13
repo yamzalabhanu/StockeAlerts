@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from alert_formatting import format_predicted_price_move, format_recommended_option_contract
 
@@ -49,6 +49,17 @@ def _near(price, level, tolerance_pct):
 
 def _safe_list(values):
     return [safe_float(x) for x in (values or []) if x is not None]
+
+
+def _truthy_flag(value):
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return False
+
+    return str(value).strip().upper() in {"1", "TRUE", "YES", "Y", "ON"}
+
 
 def _ema(values, length):
     if not values or len(values) < length:
@@ -504,6 +515,293 @@ def _mtf_trend_score(direction, tech):
     return score, reasons
 
 
+
+def _market_structure_stage_score(direction, tech):
+    """Score HH/HL or LH/LL stage behavior from recent swing points."""
+    highs = _safe_list(tech.get("daily_highs")) or _safe_list(tech.get("last_5_highs"))
+    lows = _safe_list(tech.get("daily_lows")) or _safe_list(tech.get("last_5_lows"))
+
+    if len(highs) > 5:
+        highs = highs[-5:]
+    if len(lows) > 5:
+        lows = lows[-5:]
+
+    score, reasons = 0, []
+
+    if len(highs) >= 3 and len(lows) >= 3:
+        higher_highs = highs[-1] > highs[-2] > highs[-3]
+        higher_lows = lows[-1] > lows[-2] > lows[-3]
+        lower_highs = highs[-1] < highs[-2] < highs[-3]
+        lower_lows = lows[-1] < lows[-2] < lows[-3]
+
+        if direction == "CALL" and higher_highs and higher_lows:
+            score += 15
+            reasons.append("HH/HL bullish market structure")
+        elif direction == "PUT" and lower_highs and lower_lows:
+            score += 15
+            reasons.append("LH/LL bearish market structure")
+
+    recent_high = safe_float(tech.get("recent_high"))
+    prev_high = safe_float(tech.get("previous_recent_high") or tech.get("prev_high"))
+    recent_low = safe_float(tech.get("recent_low"))
+    prev_low = safe_float(tech.get("previous_recent_low") or tech.get("prev_low"))
+
+    if direction == "CALL" and recent_high and prev_high and recent_low and prev_low:
+        if recent_high > prev_high and recent_low >= prev_low:
+            score = max(score, 15)
+            if "HH/HL bullish market structure" not in reasons:
+                reasons.append("HH/HL bullish market structure")
+    elif direction == "PUT" and recent_high and prev_high and recent_low and prev_low:
+        if recent_high <= prev_high and recent_low < prev_low:
+            score = max(score, 15)
+            if "LH/LL bearish market structure" not in reasons:
+                reasons.append("LH/LL bearish market structure")
+
+    return score, reasons
+
+
+def _ema_stage_score(direction, tech, price, closes, ema20, ema50):
+    score, reasons = 0, []
+    ema9 = safe_float(tech.get("ema9")) or _ema(closes, 9)
+    ema21 = safe_float(tech.get("ema21")) or _ema(closes, 21) or ema20
+    long_ema = safe_float(tech.get("ema50") or tech.get("dma50")) or ema50
+
+    if direction == "CALL":
+        if ema9 and ema21 and long_ema and price > ema9 > ema21 > long_ema:
+            score += 15
+            reasons.append("9/21/50 EMA bullish stage alignment")
+        elif ema21 and long_ema and price > ema21 > long_ema:
+            score += 10
+            reasons.append("21 EMA holding above trend EMA")
+    else:
+        if ema9 and ema21 and long_ema and price < ema9 < ema21 < long_ema:
+            score += 15
+            reasons.append("9/21/50 EMA bearish stage alignment")
+        elif ema21 and long_ema and price < ema21 < long_ema:
+            score += 10
+            reasons.append("21 EMA rejection below trend EMA")
+
+    return score, reasons
+
+
+def _base_breakout_score(direction, tech, price):
+    score, reasons = 0, []
+
+    resistance = max(
+        _safe_list([
+            tech.get("base_high"),
+            tech.get("previous_recent_high"),
+            tech.get("prev_high"),
+        ]) or [0]
+    )
+    support = min(
+        _safe_list([
+            tech.get("base_low"),
+            tech.get("previous_recent_low"),
+            tech.get("prev_low"),
+        ]) or [0]
+    )
+
+    if direction == "CALL" and resistance and price >= resistance * 1.002:
+        score += 15
+        reasons.append("base breakout through pivot resistance")
+    elif direction == "PUT" and support and price <= support * 0.998:
+        score += 15
+        reasons.append("base breakdown through pivot support")
+
+    return score, reasons
+
+
+def _volume_dry_up_score(direction, tech, highs, lows):
+    score, reasons = 0, []
+    rel_vol = safe_float(tech.get("rel_volume"))
+    volumes = _safe_list(tech.get("daily_volumes") or tech.get("last_20_volumes"))
+
+    tight_recent_range = False
+    if len(highs) >= 5 and len(lows) >= 5:
+        recent_high = max(highs[-5:])
+        recent_low = min(lows[-5:])
+        midpoint = (recent_high + recent_low) / 2 if recent_high and recent_low else 0
+        tight_recent_range = bool(midpoint and ((recent_high - recent_low) / midpoint) <= 0.08)
+
+    explicit_dry_up = _truthy_flag(tech.get("volume_dry_up"))
+    volume_contracting = False
+    if len(volumes) >= 10:
+        older = sum(volumes[-10:-5]) / 5
+        recent = sum(volumes[-5:]) / 5
+        volume_contracting = older > 0 and recent <= older * 0.75
+
+    if explicit_dry_up or (
+        tight_recent_range
+        and (volume_contracting or (rel_vol is not None and rel_vol <= 0.85))
+    ):
+        score += 10
+        reasons.append("volume dry-up during base")
+
+    return score, reasons
+
+
+def _vcp_contraction_score(direction, tech, highs, lows):
+    score, reasons = 0, []
+
+    if _truthy_flag(tech.get("vcp_contraction")):
+        return 10, ["VCP volatility contraction"]
+
+    if len(highs) < 10 or len(lows) < 10:
+        return 0, []
+
+    ranges = [max(h - l, 0) for h, l in zip(highs[-10:], lows[-10:])]
+    older_avg = sum(ranges[:5]) / 5
+    recent_avg = sum(ranges[5:]) / 5
+
+    if older_avg > 0 and recent_avg <= older_avg * 0.70:
+        score += 10
+        reasons.append("VCP volatility contraction")
+
+    return score, reasons
+
+
+def _retest_hold_score(direction, tech, price, ema20):
+    score, reasons = 0, []
+    lows = _safe_list(tech.get("last_5_lows"))
+    highs = _safe_list(tech.get("last_5_highs"))
+
+    if _truthy_flag(tech.get("retest_hold")):
+        return 15, ["breakout retest held"]
+
+    if direction == "CALL":
+        levels = _safe_list([
+            tech.get("base_high"),
+            tech.get("previous_recent_high"),
+            tech.get("prev_high"),
+            tech.get("ema21"),
+            ema20,
+        ])
+        for level in levels:
+            touched = any(_near(low, level, SWING_PULLBACK_TOLERANCE_PCT) for low in lows)
+            if touched and price > level:
+                score += 15
+                reasons.append("breakout retest held")
+                break
+    else:
+        levels = _safe_list([
+            tech.get("base_low"),
+            tech.get("previous_recent_low"),
+            tech.get("prev_low"),
+            tech.get("ema21"),
+            ema20,
+        ])
+        for level in levels:
+            touched = any(_near(high, level, SWING_PULLBACK_TOLERANCE_PCT) for high in highs)
+            if touched and price < level:
+                score += 15
+                reasons.append("breakdown retest rejected")
+                break
+
+    return score, reasons
+
+
+def _atr_extension_risk_score(direction, tech, price, atr, ema20, ema50):
+    score, reasons = 0, []
+
+    if _truthy_flag(tech.get("late_breakout_risk")):
+        score -= 20
+        reasons.append("late breakout risk / extended from value")
+        return score, reasons
+
+    anchor = safe_float(tech.get("ema21")) or ema20 or ema50
+    if not anchor or not atr:
+        return 0, []
+
+    extension_atr = ((price - anchor) / atr) if direction == "CALL" else ((anchor - price) / atr)
+
+    if extension_atr > 3:
+        score -= 30
+        reasons.append(f"very extended {extension_atr:.1f} ATR from EMA")
+    elif extension_atr > 2:
+        score -= 20
+        reasons.append(f"extended {extension_atr:.1f} ATR from EMA")
+
+    return score, reasons
+
+
+def _failed_reclaim_score(direction, tech, price, ema20):
+    score, reasons = 0, []
+
+    if _truthy_flag(tech.get("failed_reclaim")):
+        return -15, ["failed reclaim / rejection at key level"]
+
+    ema21 = safe_float(tech.get("ema21")) or ema20
+    last_closes = _safe_list(tech.get("last_5_closes"))
+
+    if direction == "CALL" and ema21 and len(last_closes) >= 2:
+        if price < ema21 and last_closes[-1] < ema21 and last_closes[-2] < ema21:
+            score -= 15
+            reasons.append("failed reclaim / rejection at key level")
+    elif direction == "PUT" and ema21 and len(last_closes) >= 2:
+        if price > ema21 and last_closes[-1] > ema21 and last_closes[-2] > ema21:
+            score -= 15
+            reasons.append("failed reclaim / rejection at key level")
+
+    return score, reasons
+
+
+def _gap_intent_score(direction, tech, price):
+    prev_close = safe_float(tech.get("prev_close"))
+    prev_high = safe_float(tech.get("prev_high"))
+    prev_low = safe_float(tech.get("prev_low"))
+    rel_vol = safe_float(tech.get("rel_volume")) or 0
+
+    if not prev_close:
+        return 0, []
+
+    gap_pct = _pct_diff(price, prev_close)
+    if gap_pct is None:
+        return 0, []
+
+    if (
+        direction == "CALL"
+        and gap_pct >= 2
+        and (not prev_high or price > prev_high)
+        and rel_vol >= 1.2
+    ):
+        return 5, [f"bullish gap strength {gap_pct:.1f}%"]
+
+    if (
+        direction == "PUT"
+        and gap_pct <= -2
+        and (not prev_low or price < prev_low)
+        and rel_vol >= 1.2
+    ):
+        return 5, [f"bearish gap supply {gap_pct:.1f}%"]
+
+    return 0, []
+
+
+def _institutional_price_action_score(direction, tech, price, atr, closes, ema20, ema50):
+    highs = _safe_list(tech.get("daily_highs")) or _safe_list(tech.get("last_5_highs"))
+    lows = _safe_list(tech.get("daily_lows")) or _safe_list(tech.get("last_5_lows"))
+
+    scoring_blocks = [
+        _market_structure_stage_score(direction, tech),
+        _ema_stage_score(direction, tech, price, closes, ema20, ema50),
+        _base_breakout_score(direction, tech, price),
+        _volume_dry_up_score(direction, tech, highs, lows),
+        _retest_hold_score(direction, tech, price, ema20),
+        _vcp_contraction_score(direction, tech, highs, lows),
+        _gap_intent_score(direction, tech, price),
+        _atr_extension_risk_score(direction, tech, price, atr, ema20, ema50),
+        _failed_reclaim_score(direction, tech, price, ema20),
+    ]
+
+    score, reasons = 0, []
+    for add_score, add_reasons in scoring_blocks:
+        score += add_score
+        reasons.extend(add_reasons)
+
+    return score, reasons
+
+
 def _score_direction(
     direction,
     tech,
@@ -538,6 +836,15 @@ def _score_direction(
         _structure_score(direction, tech, price, ema20, ema50),
         _relative_strength_score(direction, tech),
         _mtf_trend_score(direction, tech),
+        _institutional_price_action_score(
+            direction,
+            tech,
+            price,
+            atr,
+            closes,
+            ema20,
+            ema50,
+        ),
     ]
 
     for add_score, add_reasons in scoring_blocks:

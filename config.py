@@ -81,13 +81,12 @@ MAX_POSITION_PCT = 0.2
 # --- WATCHLIST TIERS ---
 # CORE: liquid options names scanned every cycle.
 CORE_WATCHLIST = [
-    "SPY", "QQQ", "IWM", "SMH", "SOXX", "TQQQ", "SQQQ",
-    "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
+    "SPY", "QQQ", "IWM", "SMH", "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
     "META", "AMZN", "GOOGL", "TSLA",
     "PLTR", "ARM", "MU", "SMCI", "MRVL",
-    "QCOM", "AMAT", "LRCX", "KLAC",
-    "COIN", "MSTR", "MARA", "RIOT", "HOOD",
-    "BA", "JPM", "LLY", "UNH",
+    "QCOM", "AMAT", "LRCX", "WDC",
+    "COIN", "MSTR", "MARA", "SNDK", "HOOD",
+    "BA", "JPM", "LLY", "UNH", "AAOI", "GLW"
 ]
 
 # SECONDARY: good names, but lower priority than CORE.
@@ -179,8 +178,7 @@ MASTER_WATCHLIST = [
 BASE_WATCHLIST = list(dict.fromkeys(
     CORE_WATCHLIST +
     SECONDARY_WATCHLIST +
-    SPEC_WATCHLIST +
-    MASTER_WATCHLIST
+    SPEC_WATCHLIST
 ))
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---
@@ -304,8 +302,8 @@ MAX_ALERTS_PER_SCAN = MAX_INTRADAY_ALERTS_PER_SCAN + MAX_SWING_ALERTS_PER_SCAN
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
 QUALITY_WINDOWS = [
-    ("09:30", "14:30"),
-    ("14:30", "15:59"),
+    ("08:30", "11:30"),
+    ("13:30", "14:59"),
 ]
 
 SECTOR_ETF_WEIGHT = 15

@@ -60,6 +60,33 @@ class IntradayHighQualityConfigTests(unittest.TestCase):
         )
         self.assertFalse(passes)
 
+    @patch("bot.EARLY_SESSION_GRACE_ENABLED", True)
+    @patch("bot.EARLY_SESSION_MIN_SCORE_BUFFER", 10)
+    @patch("bot.EARLY_SESSION_MIN_CONFIRMATIONS", 2)
+    @patch("bot.MIN_SCORE", 95)
+    def test_intraday_override_allows_early_session_score_and_confirmation_buffer(self):
+        bot = StockTechnicalAIBot.__new__(StockTechnicalAIBot)
+        ai = {"verdict": "WAIT", "confidence": 0, "risk_reward": 1.5, "entry_timing": "GOOD"}
+        intraday_info = {"confirmations": 2}
+
+        passes, reason = bot.ai_passes_gate(
+            ai,
+            {"score": 85, "early_session_setup": True},
+            intraday_info,
+            "BREAKOUT",
+        )
+
+        self.assertTrue(passes)
+        self.assertIn("early-session", reason)
+
+        passes, _ = bot.ai_passes_gate(
+            ai,
+            {"score": 84, "early_session_setup": True},
+            intraday_info,
+            "BREAKOUT",
+        )
+        self.assertFalse(passes)
+
 
 if __name__ == "__main__":
     unittest.main()

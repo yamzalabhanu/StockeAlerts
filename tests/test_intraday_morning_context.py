@@ -54,6 +54,9 @@ class IntradayMorningContextTests(unittest.TestCase):
         self.assertEqual(tech["last_5_closes"], expected_closes)
         self.assertEqual(tech["last_5_intraday_closes"], expected_closes)
         self.assertNotEqual(tech["last_5_closes"], [bar.close for bar in daily[-5:]])
+        self.assertEqual(tech["regular_bars_count"], 45)
+        self.assertEqual(tech["latest_regular_time"], "10:14")
+        self.assertTrue(tech["early_session_setup"])
 
 
 if __name__ == "__main__":

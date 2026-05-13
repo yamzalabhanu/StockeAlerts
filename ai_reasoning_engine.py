@@ -12,6 +12,8 @@ from config import (
     ALLOW_EXECUTION_WARNING,
     ALLOW_MTF_MIXED,
     ALLOW_SETUP_WARNING,
+    EARLY_SESSION_GRACE_ENABLED,
+    EARLY_SESSION_MIN_SCORE_BUFFER,
     MIN_SCORE,
 )
 
@@ -84,7 +86,9 @@ def build_reasoning_report(
         vision = {}
 
     score = base_score
-    high_quality_intraday = trade_type == "INTRADAY" and base_score >= MIN_SCORE
+    early_session_setup = bool(setup.get("early_session_setup") or tech.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED
+    high_quality_floor = MIN_SCORE - EARLY_SESSION_MIN_SCORE_BUFFER if early_session_setup else MIN_SCORE
+    high_quality_intraday = trade_type == "INTRADAY" and base_score >= high_quality_floor
     reasons = []
     warnings = []
     reject_reasons = []
@@ -149,9 +153,14 @@ def build_reasoning_report(
         warnings.extend((execution.get("warnings") or [])[:2])
 
     elif ex_quality:
-        score -= 18
-        reject_reasons.append("Poor liquidity/execution quality")
-        warnings.extend((execution.get("warnings") or [])[:3])
+        if early_session_setup and high_quality_intraday:
+            score -= 4
+            warnings.append("Early-session liquidity warning allowed while volume/spread data is still forming")
+            warnings.extend((execution.get("warnings") or [])[:3])
+        else:
+            score -= 18
+            reject_reasons.append("Poor liquidity/execution quality")
+            warnings.extend((execution.get("warnings") or [])[:3])
 
     filter_status = setup_quality.get("status")
 
@@ -167,9 +176,14 @@ def build_reasoning_report(
         warnings.extend((setup_quality.get("warnings") or [])[:2])
 
     elif filter_status:
-        score -= 18
-        reject_reasons.append("Setup failed elite quality filters")
-        warnings.extend((setup_quality.get("warnings") or [])[:3])
+        if early_session_setup and high_quality_intraday:
+            score -= 4
+            warnings.append("Early-session setup warning allowed before full retest/structure criteria forms")
+            warnings.extend((setup_quality.get("warnings") or [])[:3])
+        else:
+            score -= 18
+            reject_reasons.append("Setup failed elite quality filters")
+            warnings.extend((setup_quality.get("warnings") or [])[:3])
 
     vision_quality = vision.get("quality")
 

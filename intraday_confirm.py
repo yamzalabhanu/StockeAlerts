@@ -1,4 +1,9 @@
 from market_data import get_stock_data
+from config import (
+    EARLY_SESSION_GRACE_ENABLED,
+    EARLY_SESSION_MIN_CONFIRMATIONS,
+    EARLY_SESSION_REL_VOLUME_MIN,
+)
 
 
 def _vwap(df):
@@ -78,7 +83,9 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
         vwap_ok = False
         candle_ok = False
 
-    volume_ok = rel_vol >= 1.5
+    early_session = bool(analysis.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED
+    volume_min = EARLY_SESSION_REL_VOLUME_MIN if early_session else 1.5
+    volume_ok = rel_vol >= volume_min
 
     trigger_distance_pct = 0.0
     if trigger:
@@ -101,6 +108,8 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
     ])
 
     required_confirmations = 2 if daily_score >= 75 else 3
+    if early_session:
+        required_confirmations = min(required_confirmations, EARLY_SESSION_MIN_CONFIRMATIONS)
     approved = confirmations >= required_confirmations and not_too_extended
 
     reason_parts = []
@@ -111,7 +120,7 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
     if not candle_ok:
         reason_parts.append("5m candle confirmation missing or body <0.30")
     if not volume_ok:
-        reason_parts.append("5m volume spike missing")
+        reason_parts.append(f"5m volume spike missing (need {volume_min:.1f}x)")
     if not not_too_extended:
         reason_parts.append("price extended >2.0% from intraday trigger")
 
@@ -130,6 +139,8 @@ def intraday_confirmation(symbol: str, analysis: dict) -> tuple[bool, dict]:
         "ema21_5m": round(ema21, 2),
         "vwap_5m": round(vwap, 2),
         "rel_volume_5m": round(rel_vol, 2),
+        "volume_min": round(volume_min, 2),
+        "early_session_setup": bool(early_session),
         "body_pct": round(body_pct, 2),
         "trigger_distance_pct": round(trigger_distance_pct, 2),
         "ema_align": bool(ema_align),

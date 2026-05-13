@@ -1,4 +1,5 @@
 from bot_utils import safe_float
+from config import EARLY_SESSION_GRACE_ENABLED
 
 GOOD = 'GOOD'
 WARNING = 'WARNING'
@@ -60,10 +61,14 @@ def evaluate_execution_quality(tech: dict) -> dict:
             score += 8
             strengths.append('Healthy VWAP proximity')
 
+    early_session = bool(tech.get('early_session_setup')) and EARLY_SESSION_GRACE_ENABLED
+
     if score >= 25:
         quality = GOOD
-    elif score >= 5:
+    elif score >= 5 or early_session:
         quality = WARNING
+        if early_session and score < 5:
+            warnings.append('Early-session liquidity data still forming')
     else:
         quality = BAD
 

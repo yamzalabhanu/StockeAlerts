@@ -48,7 +48,8 @@ ENABLE_SWING_ALERTS = True
 ENABLE_OUTCOME_TRACKING = os.getenv("ENABLE_OUTCOME_TRACKING", "true").lower() == "true"
 OUTCOME_TRACKING_SKIP_UNAUTHORIZED = os.getenv("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", "true").lower() == "true"
 
-INTRADAY_MIN_SCORE = 85
+INTRADAY_MIN_SCORE = 95
+
 # High-quality intraday setups can pass with non-blocking WARNING states
 # when these controls are enabled and the setup score reaches MIN_SCORE.
 ALLOW_EXECUTION_WARNING = True
@@ -56,6 +57,7 @@ ALLOW_MTF_MIXED = True
 ALLOW_SETUP_WARNING = True
 MIN_SCORE = 95
 SWING_MIN_SCORE = 85
+
 SWING_MIN_REASONS = 4
 SWING_A_PLUS_SCORE = 90
 SWING_A_SCORE = 85
@@ -68,6 +70,7 @@ SWING_HOLD_DAYS_MAX = 10
 SWING_PULLBACK_TOLERANCE_PCT = 1.0
 SWING_ATR_STOP_MULTIPLIER = 1.5
 SWING_ATR_TARGET_MULTIPLIER = 4.0
+
 MAX_SWING_ALERTS_PER_SCAN = int(os.getenv("MAX_SWING_ALERTS_PER_SCAN", "5"))
 
 # --- RISK MANAGEMENT ---
@@ -78,13 +81,12 @@ MAX_POSITION_PCT = 0.2
 # --- WATCHLIST TIERS ---
 # CORE: liquid options names scanned every cycle.
 CORE_WATCHLIST = [
-    "SPY", "QQQ", "IWM", "SMH", "SOXX", "TQQQ", "SQQQ",
-    "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
+    "SPY", "QQQ", "IWM", "SMH", "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
     "META", "AMZN", "GOOGL", "TSLA",
     "PLTR", "ARM", "MU", "SMCI", "MRVL",
-    "QCOM", "AMAT", "LRCX", "KLAC",
-    "COIN", "MSTR", "MARA", "RIOT", "HOOD",
-    "BA", "JPM", "LLY", "UNH",
+    "QCOM", "AMAT", "LRCX", "WDC",
+    "COIN", "MSTR", "MARA", "SNDK", "HOOD",
+    "BA", "JPM", "LLY", "UNH", "AAOI", "GLW"
 ]
 
 # SECONDARY: good names, but lower priority than CORE.
@@ -115,6 +117,63 @@ SPEC_WATCHLIST = [
     "ARKK",
 ]
 
+MASTER_WATCHLIST = [
+    "SPY","QQQ","IWM","DIA","SMH","SOXX","XLK","XLF","XLE","XBI",
+    "TQQQ","SQQQ","UVXY","VXX","SPXL","SPXS","SOXL","SOXS",
+    "LABU","LABD","FNGU","FNGD","ARKK","ARKG","ARKF","ARKQ",
+    "XLV","XLI","XLY","XLP","IYR","KRE","GDX","SLV","GLD",
+    "USO","BITO","IBIT","HYG","TLT",
+
+    # Mega Cap / AI / Semis
+    "NVDA","AMD","AVGO","TSM","MU","MRVL","QCOM","AMAT","LRCX",
+    "KLAC","ASML","ADI","TXN","NXPI","MCHP","MPWR","ON","CRDO",
+    "ALAB","AEHR","COHR","FORM","ONTO","TER","APH","CIEN",
+    "ANET","DELL","HPE","PSTG","WDC","STX","SNDK","INTC",
+
+    # Big Tech
+    "AAPL","MSFT","META","AMZN","GOOGL","TSLA","NFLX","ORCL",
+    "CRM","NOW","ADBE","PANW","CRWD","MDB","NET","DDOG",
+    "SNOW","ZS","FTNT","SHOP","TEAM","WDAY","INTU","SNPS",
+    "CDNS","PATH","GTLB","ESTC","APP","DUOL",
+
+    # AI / Momentum
+    "PLTR","SMCI","AI","BBAI","SOUN","IONQ","QBTS","QUBT",
+    "RGTI","ARQQ","RKLB","ASTS","LUNR","ACHR","JOBY","SPCE",
+
+    # Crypto / High Beta
+    "COIN","MSTR","MARA","RIOT","CLSK","IREN","CIFR","BTDR",
+    "HOOD","SOFI","AFRM","UPST","PYPL","SQ","IBKR","SCHW",
+
+    # EV / Auto
+    "RIVN","LCID","NIO","LI","XPEV","F","GM","TSLA",
+
+    # Financials
+    "JPM","BAC","WFC","GS","MS","C","AXP","V","MA",
+
+    # Healthcare / Biotech
+    "LLY","UNH","JNJ","MRK","ABBV","PFE","TMO","ISRG",
+    "VRTX","REGN","MRNA","BNTX","BIIB","AXSM","VKTX","ALT",
+    "TEM","SMMT","CGON","ALNY","BEAM","CRSP","EDIT","NTLA",
+    "RXRX","EXAS","ILMN","DNA","PACB","TXG",
+
+    # Energy / Materials
+    "XOM","CVX","OXY","SLB","COP","HAL","FCX","NEM","CLF",
+
+    # Aerospace / Industrial
+    "BA","LMT","RTX","NOC","GE","CAT","DE",
+
+    # Retail / Consumer
+    "WMT","COST","HD","LOW","MCD","SBUX","NKE","TGT",
+    "CAVA","HIMS","CELH",
+
+    # Travel / Airlines
+    "UAL","DAL","AAL","LUV","RCL","CCL","NCLH",
+    "BKNG","EXPE","ABNB","MAR","HLT",
+
+    # Additional Active Movers
+    "AAOI","LITE","FSLR","RUN","ENPH","SEDG","DKNG","PENN",
+    "ROKU","SNAP","PINS","UBER", "RKLB"
+]
 # Static universe used as the base scan list.
 BASE_WATCHLIST = list(dict.fromkeys(
     CORE_WATCHLIST +
@@ -260,8 +319,8 @@ MAX_ALERTS_PER_SCAN = MAX_INTRADAY_ALERTS_PER_SCAN + MAX_SWING_ALERTS_PER_SCAN
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
 QUALITY_WINDOWS = [
-    ("09:30", "14:30"),
-    ("14:30", "15:59"),
+    ("08:30", "11:30"),
+    ("13:30", "14:59"),
 ]
 
 SECTOR_ETF_WEIGHT = 15

@@ -8,6 +8,43 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧭 Expanded Master Watchlist + Stricter Quality Windows
+
+The scan universe now keeps the curated `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` tiers, while also documenting the expanded `MASTER_WATCHLIST` used to track liquid ETFs, leveraged products, AI/semiconductor leaders, big tech, high-beta crypto/fintech names, biotech, energy, industrials, retail, travel, and other active movers. Intraday quality windows were tightened to the highest-opportunity parts of the day (`08:30-11:30` and `13:30-14:59` ET), and the default intraday alert threshold is now `95` so the ranked-alert flow favors cleaner A+ setups.
+
+Key defaults include:
+
+| Setting | Purpose |
+|---|---|
+| `INTRADAY_MIN_SCORE=95` | Baseline intraday quality floor before alerts are considered |
+| `MIN_SCORE=95` | High-quality setup threshold for warning-tolerant intraday paths |
+| `QUALITY_WINDOWS` | Preferred scan windows: morning momentum and early afternoon continuation |
+| `MASTER_WATCHLIST` | Broad reference universe for ETFs, sectors, AI/semis, crypto beta, biotech, and active movers |
+
+---
+
+### 🌙 Extended-Hours Bias for Opening Alerts
+
+Early-session scans can now score after-hours and pre-market price discovery before regular-session trend data is fully formed. When enabled, the bot looks for enough extended-hours volume and movement, adds directional bias weight when pre-market context agrees with the setup, and applies a conflict penalty when the opening alert fights the overnight/pre-market tape.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `EXTENDED_HOURS_BIAS_ENABLED` | Enable pre-market/after-hours directional scoring, defaults to `true` |
+| `EXTENDED_HOURS_BIAS_WEIGHT` | Score boost for aligned extended-hours context, defaults to `12` |
+| `EXTENDED_HOURS_CONFLICT_PENALTY` | Penalty when the setup conflicts with extended-hours direction, defaults to `10` |
+| `EXTENDED_HOURS_MIN_MOVE_PCT` | Minimum extended-hours move needed to count as directional context |
+| `EXTENDED_HOURS_MIN_VOLUME` | Minimum extended-hours volume required before bias is trusted |
+
+---
+
+### 🏆 Elite-Only Swing Benchmark Gate
+
+Swing alerts now use a stricter benchmark profile for top-tier swing trades. The benchmark requires an `A+` reasoning decision, a `100` composite score, at least `2R` risk/reward, directional regime alignment, acceptable execution quality, good/strong multi-timeframe alignment, and `ELITE` chart structure. The gate logs explicit rejection reasons for missed score, risk/reward, regime, execution, multi-timeframe, chart-structure, or AI-risk requirements so skipped candidates are easier to audit.
+
+---
+
 ### 🌅 Early-Session Intraday Grace Filters
 
 Opening-drive trades now get a dedicated early-session path so strong setups are not rejected just because the first candles have limited volume history, incomplete retest data, or still-forming execution context. Until `EARLY_SESSION_END_TIME` (default `10:30` New York time), the bot marks qualifying technical contexts with `early_session_setup`, allows lower relative-volume and confirmation minimums, and lets execution/setup quality return `WARNING` instead of hard rejection when the final score, AI gate, and risk/reward still justify the alert.
@@ -142,7 +179,7 @@ Key controls include:
 | `MIN_AUTO_OPTION_VOLUME` | Minimum summed option volume for options-activity qualification |
 | `MIN_AUTO_OPTION_OPEN_INTEREST` | Minimum summed option open interest for options-activity qualification |
 
-The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers.
+The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers. The expanded `MASTER_WATCHLIST` also documents the broader ETF, sector, AI/semiconductor, crypto beta, biotech, travel, and high-momentum reference universe used when broadening discovery beyond the core tiers.
 
 ---
 
@@ -156,7 +193,7 @@ This makes after-hours, weekend, and sparse-intraday swing scans more reliable.
 
 ### 🏆 Swing Benchmark Gate
 
-Swing candidates now pass through a benchmark gate after the AI reasoning report is generated. The benchmark accepts only high-quality A+/A setups with aligned trend/regime context, acceptable execution quality, strong enough multi-timeframe and chart structure, and no AI reject risks. Rejected candidates log explicit reasons such as score, regime, execution, MTF, or chart-structure misses.
+Swing candidates now pass through a benchmark gate after the AI reasoning report is generated. The benchmark now accepts only elite `A+` setups with a `100` composite score, at least `2R` risk/reward, aligned trend/regime context, acceptable execution quality, good/strong multi-timeframe structure, `ELITE` chart structure, and no blocking AI reject risks. Rejected candidates log explicit reasons such as score, risk/reward, regime, execution, MTF, or chart-structure misses.
 
 Outcome tracking now uses the full swing hold window: a displayed range like `2-10 days` is converted to the maximum horizon so the trade has the complete advertised period to reach its stop or target.
 
@@ -467,13 +504,15 @@ When intraday data is unavailable, the scanner can still evaluate swing setups f
 
 Before a swing alert is sent, the benchmark layer validates:
 
-- A+/A reasoning decision or strong final score
-- Directional market-regime alignment
+- `A+` reasoning decision
+- `100` composite score minimum
+- At least `2R` risk/reward
+- Directional market-regime alignment, including elite mixed-regime handling
 - GOOD/WARNING execution quality
-- PASS/WARNING setup quality
-- GOOD/ELITE chart-structure quality
+- PASS/WARNING/REJECT setup-quality status when other elite requirements still pass
+- `ELITE` chart-structure quality
 - GOOD/STRONG multi-timeframe alignment
-- No AI reject reasons
+- No blocking AI reject reasons
 
 
 ## Advanced Swing Confirmation
@@ -824,7 +863,18 @@ OPENAI_VISION_MODEL=gpt-5-mini
 POLYGON_API_KEY=
 ENABLE_OUTCOME_TRACKING=true       # Set false to skip post-alert Polygon minute-aggregate outcome checks
 OUTCOME_TRACKING_SKIP_UNAUTHORIZED=true  # Disable outcome checks for the run after Polygon plan entitlement errors
+
+# Optional auto-watchlist discovery
 AUTO_WATCHLIST_DATE=        # Optional YYYY-MM-DD; uses Polygon historical active movers for that day
+AUTO_WATCHLIST_USE_EXTENDED_HOURS=true
+AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT=120
+MIN_EXTENDED_HOURS_VOLUME=500000
+MIN_EXTENDED_HOURS_CHANGE_PCT=2.0
+AUTO_WATCHLIST_USE_OPTIONS=true
+AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT=80
+MIN_AUTO_OPTION_VOLUME=1000
+MIN_AUTO_OPTION_OPEN_INTEREST=5000
+
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
 ALPACA_API_KEY=
@@ -838,6 +888,11 @@ EARLY_SESSION_END_TIME=10:30
 EARLY_SESSION_MIN_SCORE_BUFFER=10
 EARLY_SESSION_MIN_CONFIRMATIONS=2
 EARLY_SESSION_REL_VOLUME_MIN=1.0
+EXTENDED_HOURS_BIAS_ENABLED=true
+EXTENDED_HOURS_BIAS_WEIGHT=12
+EXTENDED_HOURS_CONFLICT_PENALTY=10
+EXTENDED_HOURS_MIN_MOVE_PCT=0.35
+EXTENDED_HOURS_MIN_VOLUME=100000
 
 # Optional ranked alert caps
 MAX_INTRADAY_ALERTS_PER_SCAN=5

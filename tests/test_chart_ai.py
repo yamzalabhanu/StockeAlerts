@@ -72,7 +72,10 @@ class ChartVisionTests(unittest.TestCase):
             "D",
         )
 
-        self.assertEqual(reading["decision"], "ENTER")
+        self.assertEqual(reading["decision"], "A+ CALL")
+        self.assertEqual(reading["trend_direction"], "bullish")
+        self.assertEqual(reading["market_phase"], "unclear")
+        self.assertEqual(reading["etf_alignment"], "unavailable")
         self.assertTrue(reading["features"]["compression"])
         self.assertTrue(reading["features"]["liquidity_grab"])
         self.assertEqual(reading["trapped_side"], "shorts")
@@ -100,6 +103,29 @@ class ChartVisionTests(unittest.TestCase):
         self.assertEqual(result["quality"], "POOR")
         self.assertIn("FAILED_BREAKOUT", result["tags"])
         self.assertTrue(any("failed breakout" in warning.lower() for warning in result["warnings"]))
+
+
+    def test_score_vision_reading_waits_on_extended_breakout_without_retest(self):
+        result = score_vision_reading(
+            normalize_vision_reading(
+                {
+                    "decision": "WAIT",
+                    "direction": "bullish",
+                    "atr_extension": 1.8,
+                    "late_breakout_risk": "high",
+                    "retest_confirmation": "missing",
+                    "risk_reward_viability": "poor",
+                    "features": {"late_breakout": True},
+                },
+                "TEST",
+                "1/5/15",
+            ),
+            "CALL",
+        )
+
+        self.assertEqual(result["quality"], "POOR")
+        self.assertIn("EXTENDED_GT_1_5_ATR", result["tags"])
+        self.assertTrue(any("1.5 ATR" in warning for warning in result["warnings"]))
 
     def test_score_chart_structure_merges_visual_reading(self):
         result = score_chart_structure(
@@ -169,6 +195,8 @@ class ChartVisionTests(unittest.TestCase):
         text = kwargs["messages"][0]["content"][0]["text"]
         self.assertIn("failed breakouts", text)
         self.assertIn("liquidity grabs", text)
+        self.assertIn("A+ CALL, A+ PUT, WAIT, or REJECT", text)
+        self.assertIn("SPY/QQQ/SMH/VIX", text)
         self.assertTrue(kwargs["messages"][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,"))
 
 

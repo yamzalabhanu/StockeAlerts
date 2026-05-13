@@ -8,6 +8,51 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🌅 Early-Session Intraday Grace Filters
+
+Opening-drive trades now get a dedicated early-session path so strong setups are not rejected just because the first candles have limited volume history, incomplete retest data, or still-forming execution context. Until `EARLY_SESSION_END_TIME` (default `10:30` New York time), the bot marks qualifying technical contexts with `early_session_setup`, allows lower relative-volume and confirmation minimums, and lets execution/setup quality return `WARNING` instead of hard rejection when the final score, AI gate, and risk/reward still justify the alert.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `EARLY_SESSION_GRACE_ENABLED` | Enable the morning-session grace path, defaults to `true` |
+| `EARLY_SESSION_END_TIME` | Cutoff for early-session handling, defaults to `10:30` ET |
+| `EARLY_SESSION_MIN_SCORE_BUFFER` | Score buffer used when preserving strong morning candidates |
+| `EARLY_SESSION_MIN_CONFIRMATIONS` | Minimum intraday confirmations during the grace window |
+| `EARLY_SESSION_REL_VOLUME_MIN` | Relative-volume threshold during the grace window |
+
+---
+
+### 🏅 Ranked Alert Caps, ETF Buckets, and Daily De-Dupe
+
+The scanner now evaluates the full watchlist first, ranks all high-quality candidates, and then sends only the best alerts from the completed scan. Intraday and swing candidates have separate caps, ticker-level de-dupe prevents repeat alerts for the same symbol on the same day, and ETF symbols are explicitly tracked so broad-market/sector alerts can be bucketed alongside stock picks instead of flooding the same scan.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `MAX_INTRADAY_ALERTS_PER_SCAN` | Maximum intraday alerts per completed scan, defaults to `5` |
+| `MAX_SWING_ALERTS_PER_SCAN` | Maximum swing alerts per completed scan, defaults to `5` |
+| `MAX_HIGH_QUALITY_ALERTS_PER_SCAN` | Optional quieter global cap, clamped by the per-type caps |
+| `ETF_ALERT_SYMBOLS` | Built-in ETF/sector ETF bucket used by ranked alert selection |
+
+---
+
+### 🤖 Paper Options Auto-Trading Hardening
+
+Recommended option contracts can now flow directly into Alpaca paper DAY limit orders when automation is enabled. The order manager normalizes Polygon/Massive symbols such as `O:SPY260515C00500000` into Alpaca-compatible OCC symbols, avoids duplicate open tracked positions, records state in `option_order_state.json`, and manages paper exits at the configured option premium profit target or stop loss. If Alpaca rejects an order or options access is unavailable, the scanner continues and sends a clear Telegram failure/skip message.
+
+For near-term trading, the contract selector can fall back to same-week high-liquidity contracts when they pass the high-volume guardrails, so paper orders can still be staged for actionable weekly contracts rather than failing because the default DTE window is too strict.
+
+---
+
+### 🛡️ Outcome Tracking Entitlement Guard
+
+Post-alert outcome tracking now detects Polygon authorization/entitlement failures and can skip additional outcome checks for the rest of the run. This keeps scans from repeatedly failing when minute-aggregate access is unavailable, while leaving CSV outcome recording and learning flows intact when data access is valid. Use `ENABLE_OUTCOME_TRACKING=false` to disable checks permanently or keep `OUTCOME_TRACKING_SKIP_UNAUTHORIZED=true` to auto-suppress follow-up checks after entitlement errors.
+
+---
+
 ### 🧠 GPT-5 Mini Reasoning Defaults
 
 AI-backed market analysis, alert gates, trade-management decisions, and chart-vision reads now default to `gpt-5-mini`. Reasoning-capable models are configured through a shared OpenAI options helper that passes `reasoning_effort` instead of forcing low-temperature chat behavior, while non-reasoning model overrides can still use temperature settings.
@@ -770,6 +815,9 @@ python daily_report_engine.py
 
 ```text
 OPENAI_API_KEY=
+OPENAI_SCAN_MODEL=gpt-5-mini
+OPENAI_HIGH_QUALITY_MODEL=gpt-5.2
+OPENAI_HIGH_QUALITY_MIN_SCORE=95
 OPENAI_REASONING_MODEL=gpt-5-mini
 OPENAI_REASONING_EFFORT=medium
 OPENAI_VISION_MODEL=gpt-5-mini
@@ -781,6 +829,20 @@ TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
+PAPER_TRADING=true
+ENABLE_REAL_EXECUTION=false
+
+# Optional early-session intraday grace
+EARLY_SESSION_GRACE_ENABLED=true
+EARLY_SESSION_END_TIME=10:30
+EARLY_SESSION_MIN_SCORE_BUFFER=10
+EARLY_SESSION_MIN_CONFIRMATIONS=2
+EARLY_SESSION_REL_VOLUME_MIN=1.0
+
+# Optional ranked alert caps
+MAX_INTRADAY_ALERTS_PER_SCAN=5
+MAX_SWING_ALERTS_PER_SCAN=5
+MAX_HIGH_QUALITY_ALERTS_PER_SCAN=10
 
 # Optional options-flow providers and tuning
 OPTIONS_API_KEY=
@@ -807,6 +869,16 @@ TARGET_MIN_DELTA=0.35
 TARGET_MAX_DELTA=0.65
 MIN_OPTION_DTE=7
 MAX_OPTION_DTE=45
+HIGH_VOLUME_OPTION_MIN_VOLUME=10000
+HIGH_VOLUME_OPTION_MIN_DTE=0
+
+# Optional paper options auto-trading
+ENABLE_AUTO_OPTION_TRADING=true
+AUTO_OPTION_PAPER_ONLY=true
+OPTION_CONTRACT_QTY=1
+OPTION_PROFIT_TARGET_PCT=20
+OPTION_STOP_LOSS_PCT=-10
+OPTION_ORDER_STATE_FILE=option_order_state.json
 ```
 
 ---
@@ -871,6 +943,8 @@ Telegram confirmations are sent for each paper buy submission, each paper sell s
 
 - Requires historical logs for ML improvement.
 - Works best during active market sessions.
+- Early-session intraday grace applies only during the configured morning window and still depends on final score, AI, confirmation, and risk/reward checks.
+- Alpaca option automation is designed for paper trading first; live execution remains blocked unless explicitly enabled with `ENABLE_REAL_EXECUTION=true`.
 - Swing analysis can run after hours and can fall back to daily-only context.
 - Auto watchlist discovery uses Polygon live snapshots by default; set `AUTO_WATCHLIST_DATE=YYYY-MM-DD` to build the active mover watchlist for a specific historical trading day from Polygon reference tickers plus grouped daily aggregates.
 - Options-flow scoring depends on provider snapshot fields and should be treated as a proxy, not a complete tape feed.

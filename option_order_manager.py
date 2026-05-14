@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 import broker
+from config import MARKET_TZ, MAX_TRADES_PER_TRADING_DAY
 
 AUTO_OPTION_TRADING_ENABLED = os.getenv("ENABLE_AUTO_OPTION_TRADING", "true").lower() == "true"
 AUTO_OPTION_PAPER_ONLY = os.getenv("AUTO_OPTION_PAPER_ONLY", "true").lower() == "true"
@@ -46,6 +47,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _trading_day(value: Optional[str] = None) -> str:
+    """Return the market-local trading day string used for daily trade caps."""
+    if not value:
+        return datetime.now(MARKET_TZ).date().isoformat()
+
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return ""
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(MARKET_TZ).date().isoformat()
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         if value is None or value == "":
@@ -57,16 +73,34 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def _load_state(path: Path = OPTION_ORDER_STATE_FILE) -> dict[str, Any]:
     if not path.exists():
-        return {"positions": {}}
+        return {"positions": {}, "trade_counts": {}}
     try:
         with path.open("r", encoding="utf-8") as f:
             payload = json.load(f)
         if isinstance(payload, dict):
             payload.setdefault("positions", {})
+            payload.setdefault("trade_counts", {})
             return payload
     except (OSError, json.JSONDecodeError):
         pass
-    return {"positions": {}}
+    return {"positions": {}, "trade_counts": {}}
+
+
+def _daily_trade_count(state: Mapping[str, Any], trading_day: Optional[str] = None) -> int:
+    """Return the number of option buy trades recorded for a market-local day."""
+    day = trading_day or _trading_day()
+    stored_count = int((state.get("trade_counts") or {}).get(day, 0) or 0)
+    position_count = 0
+    for position in (state.get("positions") or {}).values():
+        if _trading_day(position.get("opened_at")) == day:
+            position_count += 1
+    return max(stored_count, position_count)
+
+
+def _increment_daily_trade_count(state: dict[str, Any], trading_day: Optional[str] = None) -> None:
+    day = trading_day or _trading_day()
+    counts = state.setdefault("trade_counts", {})
+    counts[day] = _daily_trade_count(state, day) + 1
 
 
 def _save_state(state: dict[str, Any], path: Path = OPTION_ORDER_STATE_FILE) -> None:
@@ -137,6 +171,15 @@ def maybe_buy_recommended_option(
         _send(telegram_sender, f"🧾 Option buy skipped for {ticker}: {symbol} already tracked as OPEN")
         return None
 
+    trades_today = _daily_trade_count(state)
+    if trades_today >= MAX_TRADES_PER_TRADING_DAY:
+        _send(
+            telegram_sender,
+            f"🧾 Option buy skipped for {ticker}: daily trade cap reached "
+            f"({trades_today}/{MAX_TRADES_PER_TRADING_DAY})",
+        )
+        return None
+
     response = broker.place_option_limit_order(symbol, qty, "BUY", limit_price)
     if _order_response_failed(response):
         _send(
@@ -160,6 +203,7 @@ def maybe_buy_recommended_option(
         last_order_response=str(response),
         submitted_price=limit_price,
     )
+    _increment_daily_trade_count(state, _trading_day(position.opened_at))
     state.setdefault("positions", {})[symbol] = asdict(position)
     _save_state(state, state_path)
 

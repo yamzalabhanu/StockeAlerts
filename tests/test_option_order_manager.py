@@ -192,6 +192,46 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertEqual(tracked["last_pnl_pct"], 21.0)
         self.assertTrue(any("SELL failed; position remains tracked as OPEN" in msg for msg in self.telegram_messages))
 
+    @patch("option_order_manager.MAX_TRADES_PER_TRADING_DAY", 10)
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_blocks_option_buy_after_ten_trades_on_same_trading_day(self, place_order):
+        manager._save_state(
+            {"positions": {}, "trade_counts": {"2026-05-14": 10}},
+            self.state_path,
+        )
+
+        with patch("option_order_manager._trading_day", return_value="2026-05-14"):
+            position = manager.maybe_buy_recommended_option(
+                ticker="SPY",
+                direction="CALL",
+                option_contract={"status": "OK", "contract_symbol": "SPY260515C00500000", "ask": 2.5},
+                telegram_sender=self.send_telegram,
+                state_path=self.state_path,
+            )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("daily trade cap reached (10/10)" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.MAX_TRADES_PER_TRADING_DAY", 10)
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-789")
+    def test_records_successful_buy_against_daily_trade_count(self, place_order):
+        with patch("option_order_manager._trading_day", return_value="2026-05-14"):
+            position = manager.maybe_buy_recommended_option(
+                ticker="QQQ",
+                direction="CALL",
+                option_contract={"status": "OK", "contract_symbol": "QQQ260515C00450000", "ask": 1.5},
+                telegram_sender=self.send_telegram,
+                state_path=self.state_path,
+            )
+
+        self.assertIsNotNone(position)
+        place_order.assert_called_once_with("QQQ260515C00450000", 1, "BUY", 1.5)
+        state = manager._load_state(self.state_path)
+        self.assertEqual(state["trade_counts"]["2026-05-14"], 1)
+
     @patch("option_order_manager.broker.PAPER", False)
     @patch("option_order_manager.broker.place_option_limit_order")
     def test_blocks_buy_when_alpaca_is_not_paper(self, place_order):

@@ -704,10 +704,18 @@ class StockTechnicalBase:
 
         trade_age = (now - trade_ts).total_seconds()
         aggregate_delay = (trade_ts - latest_regular_ts).total_seconds()
-        return (
-            0 <= trade_age <= REALTIME_STOCK_MAX_AGE_SEC
-            and aggregate_delay >= REALTIME_STOCK_DELAY_THRESHOLD_SEC
-        )
+        if not (0 <= trade_age <= REALTIME_STOCK_MAX_AGE_SEC):
+            return False
+
+        if REALTIME_STOCK_OVERLAY_REQUIRE_DELAY:
+            return aggregate_delay >= REALTIME_STOCK_DELAY_THRESHOLD_SEC
+
+        # Prefer a fresh entitled last trade for the alert price whenever it is not
+        # materially older than the latest aggregate.  Minute aggregate closes can
+        # differ from the broker-visible last trade inside the same minute, so using
+        # the fresh trade by default keeps Telegram prices aligned with live quotes
+        # instead of only fixing obviously delayed aggregates.
+        return aggregate_delay >= -REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC
 
     def build_daily_technical_context(self, ticker, daily, day):
         daily_closes = [safe_float(x.close) for x in daily if x.close is not None]

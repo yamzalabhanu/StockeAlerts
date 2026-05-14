@@ -38,6 +38,7 @@ OI_BUILD_VOLUME_OI_RATIO = float(os.getenv("OPTIONS_OI_BUILD_VOLUME_OI_RATIO", "
 IV_EXPANSION_RATIO = float(os.getenv("OPTIONS_IV_EXPANSION_RATIO", "1.15"))
 DELTA_IMBALANCE_RATIO = float(os.getenv("OPTIONS_DELTA_IMBALANCE_RATIO", "1.75"))
 GAMMA_SQUEEZE_MIN_SCORE = int(os.getenv("OPTIONS_GAMMA_SQUEEZE_MIN_SCORE", "70"))
+OPTIONS_MAX_SNAPSHOT_AGE_SEC = int(os.getenv("OPTIONS_MAX_SNAPSHOT_AGE_SEC", "900"))
 
 
 @dataclass
@@ -213,6 +214,51 @@ def _snapshot_open_interest(item: dict[str, Any]) -> int:
         or details.get("openInterest")
         or details.get("oi")
     )
+
+
+def _timestamp_to_datetime(value: Any) -> Optional[datetime]:
+    ts = _safe_float(value)
+    if ts <= 0:
+        return None
+    if ts > 1_000_000_000_000_000:
+        ts = ts / 1_000_000_000
+    elif ts > 1_000_000_000_000:
+        ts = ts / 1000
+    return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+
+def _snapshot_timestamp(item: dict[str, Any]) -> Optional[datetime]:
+    candidates: list[Any] = []
+    for section_name in ("last_quote", "last_trade", "day"):
+        section = item.get(section_name, {}) or {}
+        if isinstance(section, dict):
+            candidates.extend(
+                section.get(key)
+                for key in (
+                    "sip_timestamp",
+                    "participant_timestamp",
+                    "trf_timestamp",
+                    "timestamp",
+                    "t",
+                    "last_updated",
+                    "updated",
+                )
+            )
+    candidates.extend(
+        item.get(key)
+        for key in ("timestamp", "last_updated", "updated", "sip_timestamp")
+    )
+    timestamps = [dt_value for dt_value in (_timestamp_to_datetime(x) for x in candidates) if dt_value]
+    return max(timestamps) if timestamps else None
+
+
+def _is_snapshot_stale(item: dict[str, Any], *, now: Optional[datetime] = None) -> bool:
+    snapshot_time = _snapshot_timestamp(item)
+    if snapshot_time is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    age_sec = (now - snapshot_time).total_seconds()
+    return age_sec > OPTIONS_MAX_SNAPSHOT_AGE_SEC
 
 
 def _contract_notional(item: dict[str, Any]) -> float:
@@ -750,6 +796,8 @@ def _candidate_from_chain_item(
     volume = _snapshot_volume(item)
     oi = _snapshot_open_interest(item)
 
+    if _is_snapshot_stale(item):
+        return None, "stale"
     if not _passes_dte_filter(dte, volume):
         return None, "dte"
     if spread is not None and spread > MAX_SPREAD_PCT:
@@ -843,6 +891,8 @@ def _default_otm_candidate_from_chain_item(
     volume = _snapshot_volume(item)
     oi = _snapshot_open_interest(item)
     dollar_volume = volume * (mid or 0.0) * 100
+    if _is_snapshot_stale(item):
+        return None
     if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
         return None
 
@@ -1003,7 +1053,7 @@ def select_option_contract(
     expiries = _next_fridays(min_dte=effective_min_dte, max_dte=effective_max_dte)
     best: Optional[OptionCandidate] = None
     best_rank: tuple[float, ...] = (-1.0,)
-    rejection_counts = {"premium": 0, "spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0}
+    rejection_counts = {"premium": 0, "spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0, "stale": 0}
 
     for expiry in expiries:
         try:
@@ -1046,6 +1096,9 @@ def select_option_contract(
             volume = _snapshot_volume(item)
             oi = _snapshot_open_interest(item)
 
+            if _is_snapshot_stale(item):
+                rejection_counts["stale"] += 1
+                continue
             if not _passes_dte_filter(dte, volume, min_dte=effective_min_dte, max_dte=effective_max_dte):
                 rejection_counts["dte"] += 1
                 continue

@@ -162,6 +162,9 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         select_option_contract.assert_called_once_with(
             "TEST",
             {"signal": "CALL", "price": 100},
+            min_dte=7,
+            max_dte=14,
+            allow_default_fallback=False,
         )
 
     def test_swing_benchmark_allows_elite_quality_filter_ai_reject_risk(self):

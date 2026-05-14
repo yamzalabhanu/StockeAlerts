@@ -19,11 +19,12 @@ def learn_from_outcomes(results):
     return train_from_rows(results)
 
 
-def high_quality_alert_cap():
-    """Return the per-scan hard cap for ranked high-quality alerts."""
+def high_quality_alert_cap(daily_sent_count=0):
+    """Return the ranked-alert cap after per-scan and daily trade limits."""
     configured_cap = max(0, int(MAX_HIGH_QUALITY_ALERTS_PER_SCAN))
     hard_cap = max(0, int(MAX_ALERTS_PER_SCAN))
-    return min(configured_cap, hard_cap)
+    daily_remaining = max(0, int(MAX_TRADES_PER_TRADING_DAY) - int(daily_sent_count or 0))
+    return min(configured_cap, hard_cap, daily_remaining)
 
 
 def _candidate_ticker(candidate):
@@ -35,15 +36,21 @@ def is_etf_alert(candidate):
     return _candidate_ticker(candidate) in set(ETF_ALERT_SYMBOLS)
 
 
-def select_top_high_quality_alerts(alert_pool, excluded_tickers=None):
+def select_top_high_quality_alerts(alert_pool, excluded_tickers=None, daily_sent_count=None):
     """Rank a completed scan and return capped intraday and swing alerts.
 
     The scanner should finish evaluating every ticker before this selection runs.
     It sends no more than five intraday alerts and five swing-trade alerts per
-    scan by default, while suppressing tickers that already alerted today and
-    avoiding multiple alerts for the same ticker in the same ranked batch.
+    scan by default, while suppressing tickers that already alerted today,
+    avoiding multiple alerts for the same ticker in the same ranked batch, and
+    respecting the market-day trade cap.
     """
     excluded = {str(ticker).upper() for ticker in (excluded_tickers or set())}
+    if daily_sent_count is None:
+        daily_sent_count = len(excluded)
+    remaining_daily_slots = high_quality_alert_cap(daily_sent_count)
+    if remaining_daily_slots <= 0:
+        return []
     ranked_alerts = sorted(
         alert_pool,
         key=lambda x: x.get("ranking_score", 0),
@@ -72,7 +79,7 @@ def select_top_high_quality_alerts(alert_pool, excluded_tickers=None):
         selected_counts[alert_type] += 1
 
     selected.sort(key=lambda x: x.get("ranking_score", 0), reverse=True)
-    return selected[:high_quality_alert_cap()]
+    return selected[:remaining_daily_slots]
 
 
 def apply_enhancements(bot_cls):
@@ -202,11 +209,13 @@ def apply_enhancements(bot_cls):
                 if ENABLE_SWING_ALERTS:
                     alert_pool.extend({"alert_type": "SWING", **c} for c in swing_candidates)
 
+                already_alerted_today = alerted_tickers_today()
                 selected = select_top_high_quality_alerts(
                     alert_pool,
-                    excluded_tickers=alerted_tickers_today(),
+                    excluded_tickers=already_alerted_today,
+                    daily_sent_count=len(already_alerted_today),
                 )
-                scan_alert_cap = high_quality_alert_cap()
+                scan_alert_cap = high_quality_alert_cap(len(already_alerted_today))
 
                 sent = 0
                 swing_sent = 0

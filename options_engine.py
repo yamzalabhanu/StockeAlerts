@@ -19,6 +19,7 @@ MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "1000"))
 MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "5000"))
 MAX_SPREAD_PCT = float(os.getenv("MAX_OPTION_SPREAD_PCT", "12"))
 MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
+MIN_OPTION_PREMIUM = float(os.getenv("MIN_OPTION_PREMIUM", "0.50"))
 TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
 TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
@@ -145,6 +146,17 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _contract_entry_price(bid: Optional[float], ask: Optional[float], mid: Optional[float]) -> float:
+    """Return the premium that would be used for a buy entry."""
+    if ask is not None and ask > 0:
+        return ask
+    if mid is not None and mid > 0:
+        return mid
+    if bid is not None and bid > 0:
+        return bid
+    return 0.0
+
+
 def _round_or_none(value: Optional[float], ndigits: int = 2) -> Optional[float]:
     if value is None:
         return None
@@ -215,10 +227,19 @@ def _is_exceptional_volume(volume: int) -> bool:
     return volume >= max(MIN_OPTION_VOLUME, HIGH_VOLUME_OPTION_MIN_VOLUME)
 
 
-def _passes_dte_filter(dte: int, volume: int) -> bool:
-    if MIN_DTE <= dte <= MAX_DTE:
+def _passes_dte_filter(
+    dte: int,
+    volume: int,
+    *,
+    min_dte: Optional[int] = None,
+    max_dte: Optional[int] = None,
+) -> bool:
+    lower_bound = MIN_DTE if min_dte is None else min_dte
+    upper_bound = MAX_DTE if max_dte is None else max_dte
+    if lower_bound <= dte <= upper_bound:
         return True
-    return _is_exceptional_volume(volume) and HIGH_VOLUME_OPTION_MIN_DTE <= dte <= MAX_DTE
+    exceptional_min_dte = HIGH_VOLUME_OPTION_MIN_DTE if min_dte is None else lower_bound
+    return _is_exceptional_volume(volume) and exceptional_min_dte <= dte <= upper_bound
 
 
 def _passes_oi_filter(volume: int, oi: int) -> bool:
@@ -733,6 +754,8 @@ def _candidate_from_chain_item(
         return None, "dte"
     if spread is not None and spread > MAX_SPREAD_PCT:
         return None, "spread"
+    if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
+        return None, "premium"
     if volume < MIN_OPTION_VOLUME:
         return None, "volume"
     if not _passes_oi_filter(volume, oi):
@@ -820,6 +843,8 @@ def _default_otm_candidate_from_chain_item(
     volume = _snapshot_volume(item)
     oi = _snapshot_open_interest(item)
     dollar_volume = volume * (mid or 0.0) * 100
+    if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
+        return None
 
     option_label = "CALL" if option_type == "call" else "PUT"
     pct_label = "+5%" if option_type == "call" else "-5%"
@@ -949,10 +974,14 @@ def select_option_contract(
     symbol: str,
     analysis: dict,
     client: Optional[OptionsApiClient] = None,
+    *,
+    min_dte: Optional[int] = None,
+    max_dte: Optional[int] = None,
+    allow_default_fallback: bool = True,
 ) -> OptionCandidate:
     """Recommend the best directional option contract using Polygon/Massive snapshots.
 
-    The selector enforces spread, IV, DTE, high-volume, and high-OI guardrails
+    The selector enforces spread, IV, minimum premium, DTE, high-volume, and high-OI guardrails
     while treating delta as a quality score. Ranking prioritizes same-day option
     volume first and open interest second so alerts only recommend contracts
     traders can realistically enter and exit.
@@ -969,10 +998,12 @@ def select_option_contract(
     if price <= 0:
         return _empty_option_candidate(symbol, option_type, "SKIP", "Underlying price missing for option recommendation")
 
-    expiries = _next_fridays(min_dte=min(MIN_DTE, HIGH_VOLUME_OPTION_MIN_DTE), max_dte=MAX_DTE)
+    effective_min_dte = min_dte if min_dte is not None else min(MIN_DTE, HIGH_VOLUME_OPTION_MIN_DTE)
+    effective_max_dte = max_dte if max_dte is not None else MAX_DTE
+    expiries = _next_fridays(min_dte=effective_min_dte, max_dte=effective_max_dte)
     best: Optional[OptionCandidate] = None
     best_rank: tuple[float, ...] = (-1.0,)
-    rejection_counts = {"spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0}
+    rejection_counts = {"premium": 0, "spread": 0, "volume": 0, "oi": 0, "iv": 0, "dte": 0}
 
     for expiry in expiries:
         try:
@@ -1015,11 +1046,14 @@ def select_option_contract(
             volume = _snapshot_volume(item)
             oi = _snapshot_open_interest(item)
 
-            if not _passes_dte_filter(dte, volume):
+            if not _passes_dte_filter(dte, volume, min_dte=effective_min_dte, max_dte=effective_max_dte):
                 rejection_counts["dte"] += 1
                 continue
             if spread is not None and spread > MAX_SPREAD_PCT:
                 rejection_counts["spread"] += 1
+                continue
+            if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
+                rejection_counts["premium"] += 1
                 continue
             if volume < MIN_OPTION_VOLUME:
                 rejection_counts["volume"] += 1
@@ -1077,9 +1111,10 @@ def select_option_contract(
     if best:
         return best
 
-    default_candidate = _select_same_week_default_candidate(symbol, option_type, price, api)
-    if default_candidate:
-        return default_candidate
+    if allow_default_fallback:
+        default_candidate = _select_same_week_default_candidate(symbol, option_type, price, api)
+        if default_candidate:
+            return default_candidate
 
     rejection_text = ", ".join(f"{name}={count}" for name, count in rejection_counts.items() if count)
     suffix = f" ({rejection_text})" if rejection_text else ""
@@ -1087,7 +1122,7 @@ def select_option_contract(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed high-volume/high-OI, spread, DTE, and IV filters{suffix}; same-week 5% OTM fallback unavailable",
+        f"No option passed high-volume/high-OI, minimum premium, spread, DTE, and IV filters{suffix}; same-week 5% OTM fallback unavailable",
     )
 
 

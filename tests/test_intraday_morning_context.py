@@ -78,6 +78,57 @@ class IntradayMorningContextTests(unittest.TestCase):
         self.assertEqual(tech["latest_regular_time"], "10:14")
         self.assertTrue(tech["early_session_setup"])
 
+
+    def test_get_technical_context_overlays_fresh_realtime_trade_when_minutes_lag(self):
+        bot = StockTechnicalBase(["TEST"])
+        day = dt.date(2026, 5, 12)
+        daily = [
+            SimpleNamespace(high=100, low=95, close=98, volume=1_000_000)
+            for _ in range(220)
+        ]
+        session_start = dt.datetime.combine(day, dt.time(9, 30), tzinfo=MARKET_TZ)
+        minute = []
+        for i in range(30):
+            close = 100 + (i * 0.05)
+            minute.append(
+                SimpleNamespace(
+                    timestamp=int(
+                        (session_start + dt.timedelta(minutes=i))
+                        .astimezone(dt.timezone.utc)
+                        .timestamp()
+                        * 1000
+                    ),
+                    open=close - 0.03,
+                    high=close + 0.08,
+                    low=close - 0.08,
+                    close=close,
+                    volume=10_000 + i,
+                )
+            )
+
+        realtime_trade = {
+            "price": 104.25,
+            "timestamp": dt.datetime.combine(day, dt.time(10, 5), tzinfo=MARKET_TZ),
+            "size": 250,
+        }
+
+        with patch.object(
+            bot, "get_latest_trading_day", return_value=day
+        ), patch.object(bot, "get_aggs", side_effect=[daily, minute]), patch.object(
+            bot, "get_realtime_stock_trade", return_value=realtime_trade
+        ), patch.object(
+            bot, "_eligible_realtime_overlay", return_value=True
+        ):
+            tech = bot.get_technical_context("TEST")
+
+        self.assertEqual(tech["price"], 104.25)
+        self.assertTrue(tech["realtime_overlay_active"])
+        self.assertEqual(tech["intraday_data_source"], "realtime_trade_overlay")
+        self.assertEqual(tech["latest_regular_time"], "09:59")
+        self.assertEqual(tech["latest_price_time"], "10:05")
+        self.assertEqual(tech["last_5_closes"][-1], 104.25)
+        self.assertEqual(tech["recent_high"], 104.25)
+
     def test_get_technical_context_adds_extended_hours_bias_for_early_session(self):
         bot = StockTechnicalBase(["TEST"])
         day = dt.date(2026, 5, 12)

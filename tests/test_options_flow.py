@@ -1,3 +1,4 @@
+import datetime as dt
 import unittest
 
 from unittest.mock import patch
@@ -457,6 +458,41 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(candidate.strike, 95)
         self.assertEqual(candidate.expiry, "2099-01-15")
         self.assertIn("same-week -5% OTM PUT", candidate.reason)
+
+
+    def test_recommend_option_contracts_rejects_timestamped_stale_snapshots(self):
+        stale_ns = int(
+            dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc).timestamp()
+            * 1_000_000_000
+        )
+        chain = [
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 2.4, "ask": 2.6, "sip_timestamp": stale_ns},
+                "day": {"volume": 50000},
+                "open_interest": 50000,
+                "greeks": {"delta": 0.45},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 1.4, "ask": 1.5},
+                "day": {"volume": 2000},
+                "open_interest": 6000,
+                "greeks": {"delta": 0.35},
+                "implied_volatility": 0.5,
+            },
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 100},
+                top_n=2,
+            )
+
+        self.assertEqual([candidate.contract_symbol for candidate in candidates], ["O:XYZTESTC00110000"])
 
     def test_missing_api_key_returns_skip_report(self):
         report = analyze_options_flow("XYZ", "CALL", client=MissingOptionsClient())

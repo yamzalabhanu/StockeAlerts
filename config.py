@@ -257,13 +257,16 @@ ALLOW_NEUTRAL_15M_FOR_BREAKOUT = False
 SCAN_INTERVAL_SEC = 300
 ALERT_COOLDOWN_SEC = 900
 
-# Real-time data overlay can reduce delayed aggregate drift on Polygon plans that
-# provide last-trade entitlements. If the latest minute bar is older than the
-# configured threshold, get_technical_context() can use a fresher last trade for
-# price, EMA/trend inputs, recent highs/lows, and alert metadata.
+# Real-time data overlay can reduce quote/aggregate drift on Polygon plans that
+# provide last-trade entitlements. By default, get_technical_context() prefers a
+# fresh last trade that is not materially older than the latest aggregate; set
+# REALTIME_STOCK_OVERLAY_REQUIRE_DELAY=true to restore strict delayed-feed-only
+# overlay behavior.
 REALTIME_STOCK_OVERLAY_ENABLED = os.getenv("REALTIME_STOCK_OVERLAY_ENABLED", "true").lower() == "true"
 REALTIME_STOCK_MAX_AGE_SEC = int(os.getenv("REALTIME_STOCK_MAX_AGE_SEC", "90"))
 REALTIME_STOCK_DELAY_THRESHOLD_SEC = int(os.getenv("REALTIME_STOCK_DELAY_THRESHOLD_SEC", "180"))
+REALTIME_STOCK_OVERLAY_REQUIRE_DELAY = os.getenv("REALTIME_STOCK_OVERLAY_REQUIRE_DELAY", "false").lower() == "true"
+REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC = int(os.getenv("REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC", "60"))
 
 EMA_FAST = 9
 EMA_SLOW = 21

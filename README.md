@@ -412,7 +412,7 @@ The true options flow and liquidity engine can also use Polygon/Massive-compatib
 
 Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`, and `OPTIONS_MAX_SNAPSHOT_AGE_SEC`.
 
-To reduce the practical impact of 15-minute aggregate delays, intraday stock technicals can overlay Polygon's latest entitled stock trade when it is fresher than the newest minute bar. Enable or tune this with `REALTIME_STOCK_OVERLAY_ENABLED`, `REALTIME_STOCK_MAX_AGE_SEC`, and `REALTIME_STOCK_DELAY_THRESHOLD_SEC`; alerts expose `intraday_data_source`, `latest_price_time`, `intraday_data_delay_sec`, and `realtime_overlay_active` so stale feeds are visible instead of silently affecting scores. Option recommendations also reject snapshots with quote/trade timestamps older than `OPTIONS_MAX_SNAPSHOT_AGE_SEC` while preserving fixtures/providers that do not expose timestamps.
+To reduce the practical impact of quote/aggregate drift, intraday stock technicals prefer Polygon's latest entitled stock trade whenever it is fresh and not materially older than the newest minute bar. The Telegram alert also refreshes the displayed price from the latest entitled trade immediately before sending, so the visible alert price is less likely to differ from broker quotes because of scan latency or same-minute aggregate closes. Enable or tune this with `REALTIME_STOCK_OVERLAY_ENABLED`, `REALTIME_STOCK_MAX_AGE_SEC`, `REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC`, and the legacy strict-delay controls `REALTIME_STOCK_OVERLAY_REQUIRE_DELAY` / `REALTIME_STOCK_DELAY_THRESHOLD_SEC`; alerts expose `intraday_data_source`, `latest_price_time`, `intraday_data_delay_sec`, and `realtime_overlay_active` so stale feeds are visible instead of silently affecting scores. Option recommendations also reject snapshots with quote/trade timestamps older than `OPTIONS_MAX_SNAPSHOT_AGE_SEC` while preserving fixtures/providers that do not expose timestamps.
 
 Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
 
@@ -987,9 +987,11 @@ OPTIONS_PUT_WALL_OI_THRESHOLD=5000
 OPTIONS_CALL_WALL_OI_THRESHOLD=5000
 OPTIONS_MAX_SNAPSHOT_AGE_SEC=900
 
-# Optional real-time stock last-trade overlay for stale minute aggregates
+# Optional real-time stock last-trade overlay / alert price refresh
 REALTIME_STOCK_OVERLAY_ENABLED=true
 REALTIME_STOCK_MAX_AGE_SEC=90
+REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC=60
+REALTIME_STOCK_OVERLAY_REQUIRE_DELAY=false
 REALTIME_STOCK_DELAY_THRESHOLD_SEC=180
 OPTIONS_OI_BUILD_VOLUME_OI_RATIO=0.35
 OPTIONS_IV_EXPANSION_RATIO=1.15

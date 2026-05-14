@@ -75,6 +75,28 @@ class RankedAlertSelectionTests(unittest.TestCase):
     def test_alert_cap_can_be_lowered_for_quieter_scans(self):
         self.assertEqual(high_quality_alert_cap(), 3)
 
+    @patch("bot_enhancements.MAX_TRADES_PER_TRADING_DAY", 10)
+    @patch("bot_enhancements.MAX_ALERTS_PER_SCAN", 10)
+    @patch("bot_enhancements.MAX_HIGH_QUALITY_ALERTS_PER_SCAN", 10)
+    def test_daily_trade_cap_limits_remaining_ranked_alerts(self):
+        alert_pool = [
+            self._candidate("ONE", 100),
+            self._candidate("TWO", 90),
+            self._candidate("THREE", 80),
+        ]
+
+        selected = select_top_high_quality_alerts(alert_pool, daily_sent_count=8)
+
+        self.assertEqual([candidate["ticker"] for candidate in selected], ["ONE", "TWO"])
+
+    @patch("bot_enhancements.MAX_TRADES_PER_TRADING_DAY", 10)
+    def test_daily_trade_cap_blocks_ranked_alerts_after_ten_trades(self):
+        alert_pool = [self._candidate("ONE", 100)]
+
+        selected = select_top_high_quality_alerts(alert_pool, daily_sent_count=10)
+
+        self.assertEqual(selected, [])
+
 
 if __name__ == "__main__":
     unittest.main()

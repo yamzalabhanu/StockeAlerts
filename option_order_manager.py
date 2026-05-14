@@ -13,6 +13,7 @@ from config import MARKET_TZ, MAX_TRADES_PER_TRADING_DAY
 AUTO_OPTION_TRADING_ENABLED = os.getenv("ENABLE_AUTO_OPTION_TRADING", "true").lower() == "true"
 AUTO_OPTION_PAPER_ONLY = os.getenv("AUTO_OPTION_PAPER_ONLY", "true").lower() == "true"
 OPTION_CONTRACT_QTY = int(os.getenv("OPTION_CONTRACT_QTY", "1"))
+MIN_OPTION_BUY_PREMIUM = float(os.getenv("MIN_OPTION_BUY_PREMIUM", os.getenv("MIN_OPTION_PREMIUM", "0.50")))
 OPTION_PROFIT_TARGET_PCT = float(os.getenv("OPTION_PROFIT_TARGET_PCT", "20"))
 
 OPTION_STOP_LOSS_PCT = float(os.getenv("OPTION_STOP_LOSS_PCT", "-10"))
@@ -163,6 +164,13 @@ def maybe_buy_recommended_option(
     qty = OPTION_CONTRACT_QTY
     if not symbol or limit_price <= 0 or qty <= 0:
         _send(telegram_sender, f"🧾 Option buy skipped for {ticker}: missing contract symbol, limit price, or qty")
+        return None
+    if limit_price < MIN_OPTION_BUY_PREMIUM:
+        _send(
+            telegram_sender,
+            f"🧾 Option buy skipped for {ticker}: {symbol} limit ${limit_price:.2f} is below "
+            f"the ${MIN_OPTION_BUY_PREMIUM:.2f} minimum premium",
+        )
         return None
 
     state = _load_state(state_path)

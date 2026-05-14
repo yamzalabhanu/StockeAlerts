@@ -53,7 +53,7 @@ class OptionOrderManagerTests(unittest.TestCase):
             option_contract={
                 "status": "OK",
                 "contract_symbol": "O:GLD260515C00457000",
-                "ask": 0.26,
+                "ask": 0.56,
             },
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
@@ -61,8 +61,23 @@ class OptionOrderManagerTests(unittest.TestCase):
 
         self.assertIsNotNone(position)
         self.assertEqual(position.contract_symbol, "GLD260515C00457000")
-        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 0.26)
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 0.56)
         self.assertTrue(any("Contract: GLD260515C00457000" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_skips_option_buy_below_minimum_premium(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={"status": "OK", "contract_symbol": "O:GLD260515C00457000", "ask": 0.49},
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
     @patch(
@@ -73,13 +88,13 @@ class OptionOrderManagerTests(unittest.TestCase):
         position = manager.maybe_buy_recommended_option(
             ticker="GLD",
             direction="CALL",
-            option_contract={"status": "OK", "contract_symbol": "O:GLD260515C00457000", "ask": 0.26},
+            option_contract={"status": "OK", "contract_symbol": "O:GLD260515C00457000", "ask": 1.26},
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
         )
 
         self.assertIsNone(position)
-        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 0.26)
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "BUY", 1.26)
         state = manager._load_state(self.state_path)
         self.assertEqual(state["positions"], {})
         self.assertTrue(any("Alpaca paper BUY failed" in msg for msg in self.telegram_messages))

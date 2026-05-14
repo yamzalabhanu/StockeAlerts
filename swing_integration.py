@@ -33,6 +33,8 @@ SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECT}
 SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
 SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
 SWING_MIXED_REGIME_ELITE_SCORE = 100
+SWING_OPTION_MIN_DTE = 7
+SWING_OPTION_MAX_DTE = 14
 
 
 SWING_NON_BLOCKING_AI_REJECT_REASONS = {"Setup failed elite quality filters"}
@@ -408,6 +410,9 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
         option_contract = select_option_contract(
             ticker,
             {"signal": setup.get("direction"), "price": setup.get("price") or setup.get("entry")},
+            min_dte=SWING_OPTION_MIN_DTE,
+            max_dte=SWING_OPTION_MAX_DTE,
+            allow_default_fallback=False,
         )
         setup["option_contract"] = option_to_dict(option_contract)
         if option_contract.status == "OK":

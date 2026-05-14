@@ -335,6 +335,36 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertIn("near-term expiry", candidates[0].reason)
         self.assertIn("stale/low OI", candidates[0].reason)
 
+    def test_recommend_option_contracts_rejects_contracts_below_minimum_premium(self):
+        chain = [
+            {
+                "details": {"ticker": "O:XYZTESTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 0.44, "ask": 0.49},
+                "day": {"volume": 20000},
+                "open_interest": 50000,
+                "greeks": {"delta": 0.47},
+                "implied_volatility": 0.5,
+            },
+            {
+                "details": {"ticker": "O:XYZTESTC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": "2099-01-15"},
+                "last_quote": {"bid": 0.55, "ask": 0.60},
+                "day": {"volume": 1200},
+                "open_interest": 6000,
+                "greeks": {"delta": 0.35},
+                "implied_volatility": 0.5,
+            },
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 101},
+                top_n=2,
+            )
+
+        self.assertEqual([candidate.contract_symbol for candidate in candidates], ["O:XYZTESTC00110000"])
+        self.assertGreaterEqual(candidates[0].ask, 0.50)
 
     def test_recommend_option_contracts_prefers_liquid_contract_even_when_delta_outside_target(self):
         chain = [

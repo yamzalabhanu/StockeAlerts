@@ -87,6 +87,47 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertTrue(any("below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_skips_option_buy_when_any_available_premium_is_below_minimum(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={
+                "status": "OK",
+                "contract_symbol": "O:GLD260515C00457000",
+                "bid": 0.48,
+                "ask": 0.56,
+                "mid": 0.52,
+            },
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("bid $0.48 is below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_skips_option_buy_when_nested_last_trade_is_below_minimum(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={
+                "status": "OK",
+                "contract_symbol": "O:GLD260515C00457000",
+                "ask": 0.56,
+                "last_trade": {"price": 0.47},
+            },
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("last_trade.price $0.47 is below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
     @patch(
         "option_order_manager.broker.place_option_limit_order",
         return_value='Option order failed: {"code":42210000,"message":"asset not found"}',

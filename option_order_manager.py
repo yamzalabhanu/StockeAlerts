@@ -76,6 +76,55 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _nested_mapping_value(container: Mapping[str, Any], section: str, *names: str) -> Any:
+    nested = container.get(section)
+    if not isinstance(nested, Mapping):
+        return None
+    for name in names:
+        value = nested.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _option_premium_checks(contract: Mapping[str, Any]) -> list[tuple[str, float]]:
+    """Return all positive premium references available before submitting a buy.
+
+    A contract can appear tradable at the ask while its mark, bid, or last trade is
+    already under the configured penny-option floor.  Treat every available
+    positive premium reference as a guardrail so we do not submit orders for
+    contracts that are already showing sub-minimum prices in any common field.
+    """
+    checks: list[tuple[str, float]] = []
+    seen: set[str] = set()
+    field_sources: tuple[tuple[str, Any], ...] = (
+        ("ask", contract.get("ask")),
+        ("mid", contract.get("mid")),
+        ("bid", contract.get("bid")),
+        ("mark", contract.get("mark") or contract.get("mark_price")),
+        ("last", contract.get("last") or contract.get("last_price")),
+        ("last_quote.ask", _nested_mapping_value(contract, "last_quote", "ask", "ask_price", "ap")),
+        ("last_quote.bid", _nested_mapping_value(contract, "last_quote", "bid", "bid_price", "bp")),
+        ("last_trade.price", _nested_mapping_value(contract, "last_trade", "price", "p")),
+        ("day.close", _nested_mapping_value(contract, "day", "close", "c")),
+        ("day.vwap", _nested_mapping_value(contract, "day", "vwap", "vw")),
+    )
+    for label, raw_value in field_sources:
+        value = _safe_float(raw_value)
+        if value <= 0 or label in seen:
+            continue
+        checks.append((label, value))
+        seen.add(label)
+    return checks
+
+
+def _below_minimum_premium_check(contract: Mapping[str, Any]) -> Optional[tuple[str, float]]:
+    for label, premium in _option_premium_checks(contract):
+        if premium < MIN_OPTION_BUY_PREMIUM:
+            return label, premium
+    return None
+
+
 def _load_state(path: Path = OPTION_ORDER_STATE_FILE) -> dict[str, Any]:
     if not path.exists():
         return {"positions": {}, "trade_counts": {}}
@@ -273,6 +322,15 @@ def maybe_buy_recommended_option(
     qty = OPTION_CONTRACT_QTY
     if not symbol or limit_price <= 0 or qty <= 0:
         _send(telegram_sender, f"🧾 Option buy skipped for {ticker}: missing contract symbol, limit price, or qty")
+        return None
+    below_floor = _below_minimum_premium_check(contract)
+    if below_floor:
+        premium_label, premium_value = below_floor
+        _send(
+            telegram_sender,
+            f"🧾 Option buy skipped for {ticker}: {symbol} {premium_label} ${premium_value:.2f} is below "
+            f"the ${MIN_OPTION_BUY_PREMIUM:.2f} minimum premium",
+        )
         return None
     if limit_price < MIN_OPTION_BUY_PREMIUM:
         _send(

@@ -334,7 +334,11 @@ class OptionsFlowTests(unittest.TestCase):
             },
         ]
 
-        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+        with patch("options_engine.MIN_DTE", 1), \
+            patch("options_engine.MAX_DTE", 30000), \
+            patch("options_engine.MIN_OPTION_VOLUME", 1000), \
+            patch("options_engine.MIN_OPTION_OI", 5000), \
+            patch("options_engine.HIGH_VOLUME_OPTION_MIN_VOLUME", 10000):
             candidates = recommend_option_contracts_from_chain(
                 "XYZ",
                 chain,
@@ -368,7 +372,10 @@ class OptionsFlowTests(unittest.TestCase):
             },
         ]
 
-        with patch("options_engine.MIN_DTE", 27000), patch("options_engine.MAX_DTE", 30000):
+        with patch("options_engine.MIN_DTE", 27000), \
+            patch("options_engine.MAX_DTE", 30000), \
+            patch("options_engine.MIN_OPTION_OI", 5000), \
+            patch("options_engine.HIGH_VOLUME_OPTION_MIN_VOLUME", 10000):
             candidates = recommend_option_contracts_from_chain(
                 "XYZ",
                 chain,
@@ -476,6 +483,41 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].volume, 8000)
         self.assertEqual(candidates[0].open_interest, 25000)
+
+    def test_select_option_contract_uses_last_trade_when_quote_missing(self):
+        class LastTradeOnlyClient:
+            configured = True
+
+            def option_snapshots(self, underlying, **params):
+                expiry = params.get("expiration_date", "2099-01-15")
+                return [
+                    {
+                        "details": {"ticker": "O:XYZLASTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
+                        "last_trade": {"price": 2.35},
+                        "day": {"volume": 75},
+                        "open_interest": 150,
+                        "greeks": {"delta": 0.46},
+                        "implied_volatility": 0.5,
+                    }
+                ]
+
+            def option_trades(self, option_ticker, **params):
+                return []
+
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]), \
+            patch("options_engine.MIN_DTE", 1), \
+            patch("options_engine.MAX_DTE", 30000):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=LastTradeOnlyClient(),
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZLASTC00100000")
+        self.assertEqual(candidate.mid, 2.35)
+
 
     def test_select_option_contract_defaults_to_same_week_five_percent_call_after_skip(self):
         with patch("options_engine._next_fridays", return_value=["2099-01-15"]):

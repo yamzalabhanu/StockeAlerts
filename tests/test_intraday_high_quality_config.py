@@ -87,6 +87,30 @@ class IntradayHighQualityConfigTests(unittest.TestCase):
         )
         self.assertFalse(passes)
 
+    @patch("bot.HIGH_QUALITY_RETEST_AI_CONFIDENCE", 65)
+    @patch("bot.MIN_AI_CONFIDENCE", 75)
+    @patch("bot.MIN_SCORE", 95)
+    def test_high_quality_retest_uses_lower_ai_confidence_floor(self):
+        bot = StockTechnicalAIBot.__new__(StockTechnicalAIBot)
+        ai = {
+            "verdict": "BUY",
+            "confidence": 68,
+            "risk_reward": 1.5,
+            "entry_timing": "GOOD",
+            "retest_confirmed": True,
+        }
+        intraday_info = {"confirmations": 3, "approved": True}
+
+        passes, reason = bot.ai_passes_gate(
+            ai,
+            {"score": 94, "rule_score": 97},
+            intraday_info,
+            "RETEST",
+        )
+
+        self.assertTrue(passes)
+        self.assertIn("high-quality retest confidence floor 65", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,7 @@ Key controls include:
 | `REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC=60` | Allows a last trade when it is fresh and not materially older than the newest aggregate |
 | `REALTIME_STOCK_OVERLAY_REQUIRE_DELAY=false` | Optional legacy mode that only overlays when the aggregate feed is delayed |
 | `REALTIME_STOCK_DELAY_THRESHOLD_SEC=180` | Delay threshold used by the legacy strict-delay overlay mode |
-| `OPTIONS_MAX_SNAPSHOT_AGE_SEC=900` | Rejects stale option snapshot quote/trade data when timestamps are available |
+| `OPTIONS_MAX_SNAPSHOT_AGE_SEC=30` | Rejects stale option snapshot quote/trade data when timestamps are available |
 
 ---
 
@@ -218,7 +218,7 @@ The options selector now ranks contracts by actionable liquidity before simple m
 
 Exceptional same-day option volume can also override stale/low open interest and include near-term expirations, so alerts can recommend unusually active strikes such as a high-volume weekly call instead of a thinner contract. Tune this with `HIGH_VOLUME_OPTION_MIN_VOLUME` and `HIGH_VOLUME_OPTION_MIN_DTE`.
 
-Intraday alerts now request the next-week option window by default (`INTRADAY_OPTION_MIN_DTE=7`, `INTRADAY_OPTION_MAX_DTE=14`) before sending the alert and automated paper order. Within that Polygon snapshot window, eligible contracts are ranked by same-day volume first, then open interest and dollar liquidity, so the contract displayed in Telegram is the same higher-volume next-week contract passed to Alpaca paper trading after a successful alert send.
+Intraday alerts now request the 0DTE-to-next-Friday option window by default (`INTRADAY_OPTION_MIN_DTE=0`, `INTRADAY_OPTION_MAX_DTE=7`) before sending the alert and automated paper order. Within that Polygon snapshot window, eligible contracts are ranked by same-day volume first, then open interest and dollar liquidity, so the contract displayed in Telegram is the same higher-volume same-day or next-Friday contract passed to Alpaca paper trading after a successful alert send.
 
 Telegram alerts can include a detailed recommended-contract block with contract symbol, side, strike, expiration, DTE, bid/ask/mid, spread percentage, volume/OI, recommendation score, delta, theta, IV, and an estimated delta-only contract move if the underlying reaches target.
 
@@ -431,7 +431,7 @@ The true options flow and liquidity engine can also use Polygon/Massive-compatib
 - IV expansion proxies
 - Delta imbalance and call/put premium imbalance
 
-Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`, and `OPTIONS_MAX_SNAPSHOT_AGE_SEC`.
+Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `REQUIRE_OPTION_LIQUIDITY_FIELDS`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`, and `OPTIONS_MAX_SNAPSHOT_AGE_SEC`.
 
 To reduce the practical impact of quote/aggregate drift, intraday stock technicals prefer Polygon's latest entitled stock trade whenever it is fresh and not materially older than the newest minute bar. The Telegram alert also refreshes the displayed price from the latest entitled trade immediately before sending, so the visible alert price is less likely to differ from broker quotes because of scan latency or same-minute aggregate closes. Enable or tune this with `REALTIME_STOCK_OVERLAY_ENABLED`, `REALTIME_STOCK_MAX_AGE_SEC`, `REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC`, `REALTIME_STOCK_OVERLAY_SKIP_UNAUTHORIZED`, and the legacy strict-delay controls `REALTIME_STOCK_OVERLAY_REQUIRE_DELAY` / `REALTIME_STOCK_DELAY_THRESHOLD_SEC`; alerts expose `intraday_data_source`, `latest_price_time`, `intraday_data_delay_sec`, and `realtime_overlay_active` so stale feeds are visible instead of silently affecting scores. Option recommendations also reject snapshots with quote/trade timestamps older than `OPTIONS_MAX_SNAPSHOT_AGE_SEC` while preserving fixtures/providers that do not expose timestamps.
 
@@ -1006,7 +1006,7 @@ OPTIONS_SWEEP_NOTIONAL_THRESHOLD=250000
 OPTIONS_BLOCK_NOTIONAL_THRESHOLD=500000
 OPTIONS_PUT_WALL_OI_THRESHOLD=5000
 OPTIONS_CALL_WALL_OI_THRESHOLD=5000
-OPTIONS_MAX_SNAPSHOT_AGE_SEC=900
+OPTIONS_MAX_SNAPSHOT_AGE_SEC=30
 
 # Optional real-time stock last-trade overlay / alert price refresh
 REALTIME_STOCK_OVERLAY_ENABLED=true
@@ -1021,19 +1021,20 @@ OPTIONS_DELTA_IMBALANCE_RATIO=1.75
 OPTIONS_GAMMA_SQUEEZE_MIN_SCORE=70
 
 # Optional contract-selection tuning
-MIN_OPTION_VOLUME=1000
-MIN_OPTION_OI=5000
+MIN_OPTION_VOLUME=50
+MIN_OPTION_OI=100
 MAX_OPTION_SPREAD_PCT=12
 MAX_OPTION_IV=1.20
-TARGET_MIN_DELTA=0.35
-TARGET_MAX_DELTA=0.65
+TARGET_MIN_DELTA=0.40
+TARGET_MAX_DELTA=0.55
+REQUIRE_OPTION_LIQUIDITY_FIELDS=false
 MIN_OPTION_PREMIUM=0.50
 MIN_OPTION_DTE=7
 MAX_OPTION_DTE=45
 HIGH_VOLUME_OPTION_MIN_VOLUME=10000
 HIGH_VOLUME_OPTION_MIN_DTE=0
-INTRADAY_OPTION_MIN_DTE=7
-INTRADAY_OPTION_MAX_DTE=14
+INTRADAY_OPTION_MIN_DTE=0
+INTRADAY_OPTION_MAX_DTE=7
 INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK=true
 
 # Optional paper options auto-trading

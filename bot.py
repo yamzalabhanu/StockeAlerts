@@ -311,14 +311,22 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             return False, f"bad timing {timing}"
         if bool(ai.get("late_breakout_risk")) and entry_mode not in {"RETEST", "PULLBACK"}:
             return False, "AI sees late breakout risk"
-        if ai.get("verdict") == "BUY" and confidence >= MIN_AI_CONFIDENCE:
-            return True, "AI approved"
-
         high_quality_score = MIN_SCORE
         required_confirmations = 3
         if bool(setup.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED:
             high_quality_score = max(0, MIN_SCORE - EARLY_SESSION_MIN_SCORE_BUFFER)
             required_confirmations = min(required_confirmations, EARLY_SESSION_MIN_CONFIRMATIONS)
+
+        high_quality_retest = (
+            int(setup.get("rule_score", setup.get("score", 0)) or 0) >= MIN_SCORE
+            and entry_mode == "RETEST"
+            and bool(setup.get("retest_confirmed") or ai.get("retest_confirmed") or intraday_info.get("approved"))
+        )
+        confidence_floor = HIGH_QUALITY_RETEST_AI_CONFIDENCE if high_quality_retest else MIN_AI_CONFIDENCE
+        if ai.get("verdict") == "BUY" and confidence >= confidence_floor:
+            if confidence_floor < MIN_AI_CONFIDENCE:
+                return True, f"AI approved by high-quality retest confidence floor {confidence_floor}"
+            return True, "AI approved"
 
         if score >= high_quality_score and confirmations >= required_confirmations and entry_mode in {"BREAKOUT", "RETEST", "MOMENTUM"} and rr >= MIN_RISK_REWARD:
             reason = "early-session high-quality intraday setup with confirmation" if high_quality_score < MIN_SCORE else "high-quality intraday setup with confirmation"
@@ -344,6 +352,11 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             min_score = max(0, min_score - EARLY_SESSION_MIN_SCORE_BUFFER)
             best.setdefault("reasons", []).append(
                 f"early-session grace active: candidate score floor reduced by {EARLY_SESSION_MIN_SCORE_BUFFER}"
+            )
+        elif int(best.get("rule_score", 0) or 0) >= MIN_SCORE:
+            min_score = min(min_score, HIGH_QUALITY_RETEST_AI_CONFIDENCE)
+            best.setdefault("reasons", []).append(
+                f"elite rule score prefilter: AI score floor reduced to {min_score} pending intraday confirmation"
             )
 
         print(

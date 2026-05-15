@@ -15,16 +15,17 @@ MASSIVE_API_KEY = normalize_api_key(os.getenv("MASSIVE_API_KEY")) or POLYGON_API
 OPTIONS_API_KEY = normalize_api_key(os.getenv("OPTIONS_API_KEY")) or MASSIVE_API_KEY
 OPTIONS_API_BASE_URL = os.getenv("OPTIONS_API_BASE_URL", "https://api.polygon.io").rstrip("/")
 
-MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "1000"))
-MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "5000"))
+MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "50"))
+MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "100"))
+REQUIRE_OPTION_LIQUIDITY_FIELDS = os.getenv("REQUIRE_OPTION_LIQUIDITY_FIELDS", "false").lower() == "true"
 MAX_SPREAD_PCT = float(os.getenv("MAX_OPTION_SPREAD_PCT", "12"))
 MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
 MIN_OPTION_PREMIUM = float(os.getenv("MIN_OPTION_PREMIUM", "0.50"))
-TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
-TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
+TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.40"))
+TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.55"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
 MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "45"))
-HIGH_VOLUME_OPTION_MIN_VOLUME = int(os.getenv("HIGH_VOLUME_OPTION_MIN_VOLUME", str(MIN_OPTION_VOLUME * 10)))
+HIGH_VOLUME_OPTION_MIN_VOLUME = int(os.getenv("HIGH_VOLUME_OPTION_MIN_VOLUME", "10000"))
 HIGH_VOLUME_OPTION_MIN_DTE = int(os.getenv("HIGH_VOLUME_OPTION_MIN_DTE", "0"))
 
 FLOW_EXPIRY_DAYS = int(os.getenv("OPTIONS_FLOW_EXPIRY_DAYS", "45"))
@@ -38,7 +39,7 @@ OI_BUILD_VOLUME_OI_RATIO = float(os.getenv("OPTIONS_OI_BUILD_VOLUME_OI_RATIO", "
 IV_EXPANSION_RATIO = float(os.getenv("OPTIONS_IV_EXPANSION_RATIO", "1.15"))
 DELTA_IMBALANCE_RATIO = float(os.getenv("OPTIONS_DELTA_IMBALANCE_RATIO", "1.75"))
 GAMMA_SQUEEZE_MIN_SCORE = int(os.getenv("OPTIONS_GAMMA_SQUEEZE_MIN_SCORE", "70"))
-OPTIONS_MAX_SNAPSHOT_AGE_SEC = int(os.getenv("OPTIONS_MAX_SNAPSHOT_AGE_SEC", "900"))
+OPTIONS_MAX_SNAPSHOT_AGE_SEC = int(os.getenv("OPTIONS_MAX_SNAPSHOT_AGE_SEC", "30"))
 
 
 @dataclass
@@ -180,15 +181,37 @@ def _strike(details: dict[str, Any]) -> float:
     return _safe_float(details.get("strike_price"))
 
 
+def _last_trade_price(item: dict[str, Any]) -> Optional[float]:
+    trade = item.get("last_trade", {}) or {}
+    for key in ("price", "p", "last_price"):
+        value = trade.get(key)
+        if value is not None:
+            price = _safe_float(value)
+            if price > 0:
+                return price
+    return None
+
+
+def _day_close_price(item: dict[str, Any]) -> Optional[float]:
+    day = item.get("day", {}) or {}
+    for key in ("close", "last_price", "c", "vwap"):
+        value = day.get(key)
+        if value is not None:
+            price = _safe_float(value)
+            if price > 0:
+                return price
+    return None
+
+
 def _mid_from_snapshot(item: dict[str, Any]) -> Optional[float]:
     quote = item.get("last_quote", {}) or {}
     bid = quote.get("bid")
     ask = quote.get("ask")
     if bid is not None and ask is not None:
-        return (_safe_float(bid) + _safe_float(ask)) / 2
-    day = item.get("day", {}) or {}
-    close = day.get("close") or day.get("last_price")
-    return _safe_float(close) if close is not None else None
+        mid = (_safe_float(bid) + _safe_float(ask)) / 2
+        if mid > 0:
+            return mid
+    return _last_trade_price(item) or _day_close_price(item)
 
 
 def _snapshot_volume(item: dict[str, Any]) -> int:
@@ -288,13 +311,21 @@ def _passes_dte_filter(
     return _is_exceptional_volume(volume) and exceptional_min_dte <= dte <= upper_bound
 
 
+def _passes_volume_filter(volume: int) -> bool:
+    if volume >= MIN_OPTION_VOLUME:
+        return True
+    return not REQUIRE_OPTION_LIQUIDITY_FIELDS and volume <= 0
+
+
 def _passes_oi_filter(volume: int, oi: int) -> bool:
-    return oi >= MIN_OPTION_OI or _is_exceptional_volume(volume)
+    if oi >= MIN_OPTION_OI or _is_exceptional_volume(volume):
+        return True
+    return not REQUIRE_OPTION_LIQUIDITY_FIELDS and oi <= 0
 
 
 def _option_recommendation_reason(oi: int, volume: int, volume_oi_ratio: float, distance_pct: float, dte: int) -> str:
     qualifiers = []
-    if _is_exceptional_volume(volume) and oi < MIN_OPTION_OI:
+    if _is_exceptional_volume(volume) and oi <= MIN_OPTION_OI:
         qualifiers.append("exceptional same-day volume overrode stale/low OI")
     if _is_exceptional_volume(volume) and dte < MIN_DTE:
         qualifiers.append("exceptional same-day volume allowed near-term expiry")
@@ -804,7 +835,7 @@ def _candidate_from_chain_item(
         return None, "spread"
     if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
         return None, "premium"
-    if volume < MIN_OPTION_VOLUME:
+    if not _passes_volume_filter(volume):
         return None, "volume"
     if not _passes_oi_filter(volume, oi):
         return None, "oi"
@@ -1132,7 +1163,7 @@ def select_option_contract(
             if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
                 rejection_counts["premium"] += 1
                 continue
-            if volume < MIN_OPTION_VOLUME:
+            if not _passes_volume_filter(volume):
                 rejection_counts["volume"] += 1
                 continue
             if not _passes_oi_filter(volume, oi):

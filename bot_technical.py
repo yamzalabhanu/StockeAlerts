@@ -241,6 +241,110 @@ class StockTechnicalBase:
 
         return metrics
 
+    def _score_ratio(self, value: Any, target: float, cap: float = 2.0) -> float:
+        if target <= 0:
+            return 0.0
+
+        ratio = safe_float(value) / target
+        return max(0.0, min(100.0, (ratio / cap) * 100.0))
+
+    def _candidate_rel_volume_score(self, candidate: Dict[str, Any]) -> float:
+        rel_volume = safe_float(candidate.get("rel_volume"))
+        if rel_volume <= 0:
+            prev_volume = safe_float(candidate.get("prev_volume"))
+            daily_volume = safe_float(candidate.get("daily_volume"))
+            if prev_volume > 0:
+                rel_volume = daily_volume / prev_volume
+
+        if rel_volume > 0:
+            return self._score_ratio(rel_volume, 3.0, cap=1.0)
+
+        return max(
+            self._score_ratio(candidate.get("daily_volume"), MIN_AUTO_VOLUME, cap=1.0),
+            self._score_ratio(
+                candidate.get("extended_volume"), MIN_EXTENDED_HOURS_VOLUME, cap=1.0
+            ),
+        )
+
+    def _candidate_options_volume_score(self, candidate: Dict[str, Any]) -> float:
+        return max(
+            self._score_ratio(candidate.get("option_volume"), MIN_AUTO_OPTION_VOLUME),
+            self._score_ratio(
+                candidate.get("option_open_interest"), MIN_AUTO_OPTION_OPEN_INTEREST
+            ),
+        )
+
+    def _candidate_iv_score(self, candidate: Dict[str, Any]) -> float:
+        iv_rank = safe_float(
+            candidate.get("iv_rank")
+            or candidate.get("IV_rank")
+            or candidate.get("implied_volatility_rank")
+        )
+        if iv_rank > 0:
+            return max(0.0, min(100.0, iv_rank))
+
+        # Polygon's stock snapshot does not expose IV rank, so use the current
+        # move/options activity as an IV-expansion proxy until a direct IV source
+        # is available.
+        move_score = max(
+            self._score_ratio(candidate.get("daily_change_pct"), MIN_AUTO_CHANGE_PCT),
+            self._score_ratio(
+                candidate.get("extended_change_pct"), MIN_EXTENDED_HOURS_CHANGE_PCT
+            ),
+        )
+        return max(move_score, self._candidate_options_volume_score(candidate) * 0.75)
+
+    def _candidate_atr_score(self, candidate: Dict[str, Any]) -> float:
+        atr_pct = safe_float(candidate.get("atr_pct"))
+        if atr_pct > 0:
+            return self._score_ratio(atr_pct, 3.0, cap=1.0)
+
+        return max(
+            self._score_ratio(candidate.get("daily_change_pct"), MIN_AUTO_CHANGE_PCT),
+            self._score_ratio(
+                candidate.get("extended_change_pct"), MIN_EXTENDED_HOURS_CHANGE_PCT
+            ),
+        )
+
+    def _candidate_trend_strength_score(self, candidate: Dict[str, Any]) -> float:
+        return max(
+            self._score_ratio(candidate.get("daily_change_pct"), MIN_AUTO_CHANGE_PCT),
+            self._score_ratio(
+                candidate.get("extended_change_pct"), MIN_EXTENDED_HOURS_CHANGE_PCT
+            ),
+        )
+
+    def _candidate_news_score(self, candidate: Dict[str, Any]) -> float:
+        if candidate.get("news_catalyst") or candidate.get("earnings"):
+            return 100.0
+
+        sentiment = safe_float(candidate.get("news_sentiment"))
+        if sentiment:
+            return max(0.0, min(100.0, sentiment))
+
+        return 0.0
+
+    def _score_watchlist_candidate(self, candidate: Dict[str, Any]) -> float:
+        component_scores = {
+            "rel_volume_score": self._candidate_rel_volume_score(candidate),
+            "options_volume_score": self._candidate_options_volume_score(candidate),
+            "IV_score": self._candidate_iv_score(candidate),
+            "ATR_score": self._candidate_atr_score(candidate),
+            "trend_strength": self._candidate_trend_strength_score(candidate),
+            "news_sentiment": self._candidate_news_score(candidate),
+        }
+        candidate.update(component_scores)
+
+        score = (
+            (0.30 * component_scores["rel_volume_score"])
+            + (0.20 * component_scores["options_volume_score"])
+            + (0.20 * component_scores["IV_score"])
+            + (0.15 * component_scores["ATR_score"])
+            + (0.10 * component_scores["trend_strength"])
+            + (0.05 * component_scores["news_sentiment"])
+        )
+        return round(max(0.0, min(100.0, score)), 2)
+
     def _rank_watchlist_candidates(
         self, candidates: List[Dict[str, Any]], label: str
     ) -> List[str]:
@@ -265,44 +369,9 @@ class StockTechnicalBase:
                 except Exception as e:
                     print(f"Options watchlist metrics skipped for {ticker}: {e}")
 
-            daily_score = max(
-                safe_float(candidate.get("daily_change_pct"))
-                / max(MIN_AUTO_CHANGE_PCT, 0.01),
-                safe_float(candidate.get("daily_volume")) / max(MIN_AUTO_VOLUME, 1),
-            )
-            extended_score = max(
-                safe_float(candidate.get("extended_change_pct"))
-                / max(MIN_EXTENDED_HOURS_CHANGE_PCT, 0.01),
-                safe_float(candidate.get("extended_volume"))
-                / max(MIN_EXTENDED_HOURS_VOLUME, 1),
-            )
-            option_score = max(
-                safe_float(candidate.get("option_volume"))
-                / max(MIN_AUTO_OPTION_VOLUME, 1),
-                safe_float(candidate.get("option_open_interest"))
-                / max(MIN_AUTO_OPTION_OPEN_INTEREST, 1),
-            )
-
-            candidate["watchlist_score"] = (
-                daily_score + (extended_score * 1.25) + (option_score * 1.5)
-            )
+            candidate["watchlist_score"] = self._score_watchlist_candidate(candidate)
             candidate["qualified"] = (
-                (
-                    safe_float(candidate.get("daily_volume")) >= MIN_AUTO_VOLUME
-                    and safe_float(candidate.get("daily_change_pct"))
-                    >= MIN_AUTO_CHANGE_PCT
-                )
-                or (
-                    safe_float(candidate.get("extended_volume"))
-                    >= MIN_EXTENDED_HOURS_VOLUME
-                    and safe_float(candidate.get("extended_change_pct"))
-                    >= MIN_EXTENDED_HOURS_CHANGE_PCT
-                )
-                or (
-                    safe_float(candidate.get("option_volume")) >= MIN_AUTO_OPTION_VOLUME
-                    and safe_float(candidate.get("option_open_interest"))
-                    >= MIN_AUTO_OPTION_OPEN_INTEREST
-                )
+                candidate["watchlist_score"] >= AUTO_WATCHLIST_MIN_SCORE
             )
 
         movers = [candidate for candidate in candidates if candidate.get("qualified")]

@@ -157,6 +157,41 @@ class AutoWatchlistTests(unittest.TestCase):
             {"apiKey": bot_technical.POLYGON_API_KEY},
         )
 
+    def test_dynamic_watchlist_score_uses_weighted_intraday_components(self):
+        bot = StockTechnicalBase(["BASE"])
+        weak = {
+            "ticker": "CHOP",
+            "day": dt.date(2025, 1, 15),
+            "price": 25,
+            "daily_volume": 2_100_000,
+            "daily_change_pct": 0.2,
+            "option_volume": 0,
+            "option_open_interest": 0,
+        }
+        active = {
+            "ticker": "FAST",
+            "day": dt.date(2025, 1, 15),
+            "price": 50,
+            "daily_volume": 4_000_000,
+            "daily_change_pct": 3.0,
+            "extended_volume": 750_000,
+            "extended_change_pct": 3.0,
+            "option_volume": 1_500,
+            "option_open_interest": 7_000,
+            "iv_rank": 65,
+        }
+
+        with patch.object(bot_technical, "AUTO_WATCHLIST_MIN_SCORE", 70), patch.object(
+            bot_technical, "AUTO_WATCHLIST_EXTENDED_CANDIDATE_LIMIT", 0
+        ), patch.object(
+            bot_technical, "AUTO_WATCHLIST_OPTIONS_CANDIDATE_LIMIT", 0
+        ):
+            watchlist = bot._rank_watchlist_candidates([weak, active], "unit")
+
+        self.assertEqual(watchlist, ["BASE", "FAST"])
+        self.assertGreaterEqual(active["watchlist_score"], 70)
+        self.assertLess(weak["watchlist_score"], 70)
+
 
 if __name__ == "__main__":
     unittest.main()

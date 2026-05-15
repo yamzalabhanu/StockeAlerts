@@ -451,6 +451,9 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             option_contract = select_option_contract(
                 ticker,
                 {"signal": best.get("direction"), "price": ai.get("entry") or tech.get("price")},
+                min_dte=INTRADAY_OPTION_MIN_DTE,
+                max_dte=INTRADAY_OPTION_MAX_DTE,
+                allow_default_fallback=INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK,
             )
             best["option_contract"] = option_to_dict(option_contract)
             missing_option_details = missing_option_contract_order_details(best["option_contract"])

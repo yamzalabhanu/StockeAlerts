@@ -218,6 +218,8 @@ The options selector now ranks contracts by actionable liquidity before simple m
 
 Exceptional same-day option volume can also override stale/low open interest and include near-term expirations, so alerts can recommend unusually active strikes such as a high-volume weekly call instead of a thinner contract. Tune this with `HIGH_VOLUME_OPTION_MIN_VOLUME` and `HIGH_VOLUME_OPTION_MIN_DTE`.
 
+Intraday alerts now request the next-week option window by default (`INTRADAY_OPTION_MIN_DTE=7`, `INTRADAY_OPTION_MAX_DTE=14`) before sending the alert and automated paper order. Within that Polygon snapshot window, eligible contracts are ranked by same-day volume first, then open interest and dollar liquidity, so the contract displayed in Telegram is the same higher-volume next-week contract passed to Alpaca paper trading after a successful alert send.
+
 Telegram alerts can include a detailed recommended-contract block with contract symbol, side, strike, expiration, DTE, bid/ask/mid, spread percentage, volume/OI, recommendation score, delta, theta, IV, and an estimated delta-only contract move if the underlying reaches target.
 
 ---
@@ -1030,6 +1032,9 @@ MIN_OPTION_DTE=7
 MAX_OPTION_DTE=45
 HIGH_VOLUME_OPTION_MIN_VOLUME=10000
 HIGH_VOLUME_OPTION_MIN_DTE=0
+INTRADAY_OPTION_MIN_DTE=7
+INTRADAY_OPTION_MAX_DTE=14
+INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK=true
 
 # Optional paper options auto-trading
 ENABLE_AUTO_OPTION_TRADING=true

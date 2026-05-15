@@ -1206,7 +1206,7 @@ def select_option_contract(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed high-volume/high-OI, minimum premium, spread, DTE, and IV filters{suffix}; same-week 5% OTM fallback unavailable",
+        f"No option passed high-volume/high-OI, minimum premium, spread, DTE, and IV filters{suffix}; configured 5% OTM fallback unavailable",
     )
 
 

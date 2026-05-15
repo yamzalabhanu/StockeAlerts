@@ -73,6 +73,12 @@ SWING_ATR_TARGET_MULTIPLIER = 4.0
 
 MAX_SWING_ALERTS_PER_SCAN = int(os.getenv("MAX_SWING_ALERTS_PER_SCAN", "5"))
 
+# Intraday option recommendations/orders should favor the next-week weekly
+# contract window and rank eligible Polygon snapshots by same-day volume first.
+INTRADAY_OPTION_MIN_DTE = int(os.getenv("INTRADAY_OPTION_MIN_DTE", "7"))
+INTRADAY_OPTION_MAX_DTE = int(os.getenv("INTRADAY_OPTION_MAX_DTE", "14"))
+INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK = os.getenv("INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK", "true").lower() == "true"
+
 # --- RISK MANAGEMENT ---
 ACCOUNT_SIZE = 100000
 RISK_PER_TRADE_PCT = 0.01

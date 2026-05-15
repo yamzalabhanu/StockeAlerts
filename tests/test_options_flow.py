@@ -159,6 +159,34 @@ class NextWeekSelectionClient:
         return []
 
 
+class ValidDataFallbackClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date", "2099-01-15")
+        return [
+            {
+                "details": {"ticker": "O:XYZFALLC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 0.08, "ask": 0.12},
+                "day": {"volume": 25},
+                "open_interest": 12,
+                "greeks": {"delta": 0.22},
+                "implied_volatility": 1.8,
+            },
+            {
+                "details": {"ticker": "O:XYZFALLC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": expiry},
+                "last_quote": {"bid": 0.04, "ask": 0.06},
+                "day": {"volume": 10},
+                "open_interest": 5,
+                "greeks": {"delta": 0.12},
+                "implied_volatility": 1.6,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class MissingOptionsClient:
     configured = False
 
@@ -546,6 +574,20 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(candidate.strike, 95)
         self.assertEqual(candidate.expiry, "2099-01-15")
         self.assertIn("same-week -5% OTM PUT", candidate.reason)
+
+    def test_select_option_contract_uses_best_available_valid_snapshot_after_all_strict_fallbacks_skip(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=ValidDataFallbackClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZFALLC00105000")
+        self.assertEqual(candidate.ask, 0.12)
+        self.assertIn("Best available contract after strict filters skipped", candidate.reason)
+        self.assertIn("strict liquidity/quality filters were not all met", candidate.reason)
 
 
     def test_recommend_option_contracts_rejects_timestamped_stale_snapshots(self):

@@ -512,6 +512,66 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(candidates[0].volume, 8000)
         self.assertEqual(candidates[0].open_interest, 25000)
 
+    def test_option_contract_provider_aliases_are_used_for_orderable_candidate(self):
+        chain = [
+            {
+                "details": {
+                    "symbol": "O:XYZALIASC00105000",
+                    "contractType": "call",
+                    "strikePrice": 105,
+                    "expirationDate": "2099-01-15",
+                },
+                "last_quote": {"bid_price": 2.4, "ask_price": 2.7},
+                "day": {"volume": 8000},
+                "openInterest": 25000,
+                "greeks": {"delta": 0.47},
+                "implied_volatility": 0.62,
+            }
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 101},
+            )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].contract_symbol, "O:XYZALIASC00105000")
+        self.assertEqual(candidates[0].strike, 105)
+        self.assertEqual(candidates[0].expiry, "2099-01-15")
+        self.assertEqual(candidates[0].ask, 2.7)
+        self.assertEqual(candidates[0].mid, 2.55)
+
+    def test_option_contract_midpoint_alias_can_price_candidate_without_bid_ask(self):
+        chain = [
+            {
+                "details": {
+                    "ticker": "O:XYZMIDC00105000",
+                    "contract_type": "call",
+                    "strike_price": 105,
+                    "expiration_date": "2099-01-15",
+                },
+                "last_quote": {"midpoint": 2.55},
+                "day": {"volume": 8000},
+                "open_interest": 25000,
+                "greeks": {"delta": 0.47},
+                "implied_volatility": 0.62,
+            }
+        ]
+
+        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+            candidates = recommend_option_contracts_from_chain(
+                "XYZ",
+                chain,
+                {"signal": "CALL", "price": 101},
+            )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].contract_symbol, "O:XYZMIDC00105000")
+        self.assertIsNone(candidates[0].ask)
+        self.assertEqual(candidates[0].mid, 2.55)
+
     def test_select_option_contract_uses_last_trade_when_quote_missing(self):
         class LastTradeOnlyClient:
             configured = True

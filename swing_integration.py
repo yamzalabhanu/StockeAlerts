@@ -345,9 +345,17 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
     has_orderable_option = has_valid_option_contract_order_details(option_contract)
     if not has_orderable_option:
         missing_option_details = missing_option_contract_order_details(option_contract)
+        option_status = option_contract.get("status") if isinstance(option_contract, dict) else None
+        option_reason = option_contract.get("reason") if isinstance(option_contract, dict) else None
+        detail_text = ", ".join(missing_option_details)
+        reason_text = (
+            f"; status={option_status or 'missing'}; reason={option_reason}"
+            if option_reason or option_status
+            else ""
+        )
         print(
             f"{ticker}: swing alert continuing without orderable option contract "
-            f"({', '.join(missing_option_details)})"
+            f"({detail_text}{reason_text})"
         )
 
     try:
@@ -514,9 +522,17 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
         setup["option_contract"] = option_to_dict(option_contract)
         missing_option_details = missing_option_contract_order_details(setup["option_contract"])
         if missing_option_details:
+            option_status = setup["option_contract"].get("status")
+            option_reason = setup["option_contract"].get("reason")
+            detail_text = ", ".join(missing_option_details)
+            reason_text = (
+                f"; status={option_status or 'missing'}; reason={option_reason}"
+                if option_reason or option_status
+                else ""
+            )
             print(
                 f"{ticker}: swing continuing without orderable option contract "
-                f"({', '.join(missing_option_details)})"
+                f"({detail_text}{reason_text})"
             )
         else:
             option_score_bonus = min(5, (option_contract.recommendation_score or 0) * 0.04)

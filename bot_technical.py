@@ -3,12 +3,48 @@ from polygon import RESTClient
 
 import datetime as dt
 import time
+import re
 import requests
 from typing import Any, Dict, List, Optional, Union
 
 from bot_utils import safe_float, pct_diff
 
 client = RESTClient(POLYGON_API_KEY)
+
+_realtime_stock_lookup_disabled_reason = None
+
+
+def _redact_polygon_api_key(value):
+    """Remove Polygon API keys from exception text before logging."""
+    return re.sub(r"([?&]apiKey=)[^\s&]+", r"\1<redacted>", str(value))
+
+
+def _is_polygon_not_authorized_error(error):
+    """Return True when Polygon rejects a request because of auth/entitlements."""
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code in (401, 403):
+        return True
+
+    text = str(error).lower()
+    return (
+        "401 client error" in text
+        or "403 client error" in text
+        or "forbidden" in text
+        or "not_authorized" in text
+        or "not authorized" in text
+        or "doesn't include" in text
+        or "entitlement" in text
+    )
+
+
+def _disable_realtime_stock_lookup(reason):
+    """Disable real-time stock lookups for this process after auth failure."""
+    global _realtime_stock_lookup_disabled_reason
+    if not _realtime_stock_lookup_disabled_reason:
+        _realtime_stock_lookup_disabled_reason = reason
+        print(f"Realtime stock trade overlay disabled for this run: {reason}")
+
 
 
 class StockTechnicalBase:
@@ -664,7 +700,11 @@ class StockTechnicalBase:
 
     def get_realtime_stock_trade(self, ticker):
         """Return the latest entitled stock trade from Polygon's last-trade endpoint."""
-        if not REALTIME_STOCK_OVERLAY_ENABLED or not POLYGON_API_KEY:
+        if (
+            not REALTIME_STOCK_OVERLAY_ENABLED
+            or not POLYGON_API_KEY
+            or _realtime_stock_lookup_disabled_reason
+        ):
             return None
 
         try:
@@ -672,7 +712,20 @@ class StockTechnicalBase:
                 f"https://api.polygon.io/v2/last/trade/{ticker}"
             )
         except Exception as e:
-            print(f"{ticker}: realtime trade lookup skipped: {e}")
+            if (
+                REALTIME_STOCK_OVERLAY_SKIP_UNAUTHORIZED
+                and _is_polygon_not_authorized_error(e)
+            ):
+                _disable_realtime_stock_lookup(
+                    "Polygon API key is not authorized for the last-trade endpoint. "
+                    "Set REALTIME_STOCK_OVERLAY_ENABLED=false to disable this lookup "
+                    "or upgrade Polygon access for real-time stock trades."
+                )
+            else:
+                print(
+                    f"{ticker}: realtime trade lookup skipped: "
+                    f"{_redact_polygon_api_key(e)}"
+                )
             return None
 
         result = data.get("results") or data.get("last") or data

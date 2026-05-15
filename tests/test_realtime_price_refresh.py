@@ -2,6 +2,7 @@ import datetime as dt
 import unittest
 from unittest.mock import patch
 
+import bot_technical
 from config import MARKET_TZ
 from bot import StockTechnicalAIBot
 from bot_technical import StockTechnicalBase
@@ -64,6 +65,61 @@ class RealtimePriceRefreshTests(unittest.TestCase):
         self.assertEqual(refreshed["intraday_data_source"], "realtime_trade_alert_refresh")
         self.assertTrue(refreshed["realtime_overlay_active"])
         self.assertEqual(refreshed["intraday_data_delay_sec"], 10)
+
+    def test_realtime_trade_auth_failure_disables_overlay_for_run_without_key_leak(self):
+        bot = StockTechnicalBase(["SPY"])
+        bot_technical._realtime_stock_lookup_disabled_reason = None
+
+        try:
+            with patch.object(bot_technical, "POLYGON_API_KEY", "secret-key"), patch.object(
+                bot_technical, "REALTIME_STOCK_OVERLAY_ENABLED", True
+            ), patch.object(
+                bot_technical, "REALTIME_STOCK_OVERLAY_SKIP_UNAUTHORIZED", True
+            ), patch.object(
+                bot,
+                "_request_polygon_json",
+                side_effect=Exception(
+                    "403 Client Error: Forbidden for url: "
+                    "https://api.polygon.io/v2/last/trade/SPY?apiKey=secret-key"
+                ),
+            ) as request, patch("builtins.print") as printed:
+                self.assertIsNone(bot.get_realtime_stock_trade("SPY"))
+                self.assertIsNone(bot.get_realtime_stock_trade("QQQ"))
+
+            self.assertEqual(request.call_count, 1)
+            printed.assert_called_once()
+            message = printed.call_args.args[0]
+            self.assertIn("Realtime stock trade overlay disabled for this run", message)
+            self.assertNotIn("secret-key", message)
+            self.assertNotIn("apiKey=", message)
+        finally:
+            bot_technical._realtime_stock_lookup_disabled_reason = None
+
+    def test_realtime_trade_non_auth_error_redacts_api_key_but_does_not_disable(self):
+        bot = StockTechnicalBase(["SPY"])
+        bot_technical._realtime_stock_lookup_disabled_reason = None
+
+        try:
+            with patch.object(bot_technical, "POLYGON_API_KEY", "secret-key"), patch.object(
+                bot_technical, "REALTIME_STOCK_OVERLAY_ENABLED", True
+            ), patch.object(
+                bot,
+                "_request_polygon_json",
+                side_effect=RuntimeError(
+                    "500 Server Error for url: "
+                    "https://api.polygon.io/v2/last/trade/SPY?apiKey=secret-key"
+                ),
+            ), patch("builtins.print") as printed:
+                self.assertIsNone(bot.get_realtime_stock_trade("SPY"))
+
+            printed.assert_called_once()
+            message = printed.call_args.args[0]
+            self.assertIn("SPY: realtime trade lookup skipped", message)
+            self.assertIn("apiKey=<redacted>", message)
+            self.assertNotIn("secret-key", message)
+            self.assertIsNone(bot_technical._realtime_stock_lookup_disabled_reason)
+        finally:
+            bot_technical._realtime_stock_lookup_disabled_reason = None
 
 
 if __name__ == "__main__":

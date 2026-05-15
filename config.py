@@ -79,43 +79,113 @@ RISK_PER_TRADE_PCT = 0.01
 MAX_POSITION_PCT = 0.2
 
 # --- WATCHLIST TIERS ---
-# CORE: liquid options names scanned every cycle.
+# TIER 1 / CORE: high-liquidity options names scanned every cycle. Keep this
+# deliberately tight so intraday alerts favor clean spreads, reliable 0DTE/1DTE
+# movement, and lower-slippage technical setups.
 CORE_WATCHLIST = [
-    "SPY", "QQQ", "IWM", "SMH", "NVDA", "AMD", "AVGO", "TSM", "AAPL", "MSFT",
-    "META", "AMZN", "GOOGL", "TSLA",
-    "PLTR", "ARM", "MU", "SMCI", "MRVL",
-    "QCOM", "AMAT", "LRCX", "WDC",
-    "COIN", "MSTR", "MARA", "SNDK", "HOOD",
-    "BA", "JPM", "LLY", "UNH", "AAOI", "GLW"
+    # Index / ETFs (highest priority)
+    "SPY", "QQQ", "IWM", "SMH", "SOXX",
+    "TQQQ", "SQQQ", "SOXL", "SOXS",
+    "UVXY",
+
+    # Mega-cap momentum / semis
+    "NVDA", "AMD", "AVGO", "TSM", "MU",
+    "MRVL", "QCOM", "AMAT", "LRCX",
+    "ASML", "WDC", "SMCI",
+
+    # Big tech
+    "AAPL", "MSFT", "META", "AMZN",
+    "GOOGL", "TSLA", "NFLX",
+
+    # AI / momentum
+    "PLTR", "ARM",
+
+    # Crypto/high beta
+    "COIN", "MSTR", "MARA", "HOOD",
+
+    # Financial movers
+    "JPM", "GS", "BAC",
+
+    # Healthcare movers
+    "LLY", "UNH", "VRTX",
+
+    # Aerospace / momentum
+    "BA",
+
+    # Special movers traded often
+    "AAOI", "LITE", "ACHR", "JOBY",
 ]
 
-# SECONDARY: good names, but lower priority than CORE.
+# TIER 2: scan only when the symbol is active (RVOL/news/gap/IV/options flow).
 SECONDARY_WATCHLIST = [
-    "INTC", "ORCL", "CRM", "NOW", "ADBE",
-    "PANW", "CRWD", "MDB", "NET", "DDOG", "SNOW",
+    "INTC", "ORCL", "CRM", "NOW",
+    "PANW", "CRWD", "MDB", "NET",
+    "SNOW", "DDOG",
+
     "DELL", "HPE", "ON", "MPWR",
-    "SOFI", "AFRM", "PYPL", "UPST",
+
+    "SOFI", "AFRM", "UPST", "PYPL",
+
     "XOM", "CVX", "OXY", "SLB", "FCX",
-    "LMT", "RTX", "NOC", "RKLB",
-    "COST", "WMT", "HD", "LOW", "SBUX", "MCD",
-    "UBER", "ABNB",
-    "BAC", "WFC", "GS", "MS", "V", "MA", "AXP",
-    "NVO", "VRTX", "REGN", "MRNA",
+
+    "RKLB", "RIVN", "LCID",
+
+    "UAL", "DAL", "CCL", "RCL",
+
+    "NKE", "WMT", "COST",
+
+    "REGN", "MRNA", "BIIB", "AXSM",
 ]
 
-# SPEC: scan only when these symbols become active movers.
+# TIER 3: event-driven only. These are intentionally not part of the base scan.
 SPEC_WATCHLIST = [
-    "IONQ", "RGTI", "QBTS", "QUBT", "ARQQ",
-    "AI", "SNDK", "LITE", "AAOI",
-    "XYZ", "RIVN", "LCID", "NIO", "XPEV", "LI",
-    "F", "GM",
-    "USO", "CLF", "NEM",
-    "ACHR", "JOBY",
-    "NKE",
-    "UAL", "DAL", "AAL", "CCL", "RCL",
-    "BIIB", "AXSM",
-    "ARKK",
+    "IONQ", "QBTS", "QUBT", "RGTI",
+    "ARQQ", "AI",
+
+    "SPCE",
+
+    "NIO", "XPEV", "LI",
+
+    "CLF", "NEM",
+
+    "PENN", "ROKU", "SNAP", "PINS",
+
+    "RUN", "ENPH", "SEDG",
 ]
+
+DEPRIORITIZED_INTRADAY_OPTIONS = [
+    # Too slow / weak intraday options
+    "HD", "LOW", "SBUX", "MCD",
+    "JNJ", "PFE", "MRK",
+    "TGT", "DE", "CAT",
+
+    # Lower-quality spreads / inconsistent intraday options
+    "DNA", "PACB", "TXG",
+    "EDIT", "NTLA", "CRSP",
+    "BNTX",
+
+    # Too noisy unless catalyst
+    "ARKG", "ARKF", "ARKQ",
+    "LUV", "NCLH",
+]
+
+WATCHLIST_ACTIVITY_RULES = {
+    "secondary": [
+        "rel_volume > 1.8",
+        "unusual_options_flow",
+        "gap_pct > 2",
+        "IV_rank > 50",
+        "top_market_movers",
+        "breaking PMH/PDH",
+    ],
+    "spec": [
+        "news catalyst",
+        "earnings",
+        "gap_pct > 5",
+        "rel_volume > 2",
+        "unusual_options_flow spike",
+    ],
+}
 
 MASTER_WATCHLIST = [
     "SPY","QQQ","IWM","DIA","SMH","SOXX","XLK","XLF","XLE","XBI",
@@ -172,15 +242,15 @@ MASTER_WATCHLIST = [
 
     # Additional Active Movers
     "AAOI","LITE","FSLR","RUN","ENPH","SEDG","DKNG","PENN",
-    "ROKU","SNAP","PINS","UBER", "RKLB"
+    "ROKU","SNAP","PINS","UBER", "RKLB",
 ]
-# Static universe used as the base scan list.
-BASE_WATCHLIST = list(dict.fromkeys(
-    CORE_WATCHLIST +
-    SECONDARY_WATCHLIST +
-    SPEC_WATCHLIST +
-    MASTER_WATCHLIST
-))
+
+
+# Static universe scanned on every cycle. Secondary/speculative symbols come in only
+# through the dynamic mover gate so the live bot targets ~40 core names + active movers
+# instead of scanning 150+ tickers continuously.
+BASE_WATCHLIST = list(dict.fromkeys(CORE_WATCHLIST))
+
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---
 # StockTechnicalBase.get_auto_watchlist() merges Polygon movers with BASE_WATCHLIST.
@@ -188,7 +258,8 @@ BASE_WATCHLIST = list(dict.fromkeys(
 # tickers that were active on that historical trading day.
 USE_AUTO_WATCHLIST = True
 AUTO_WATCHLIST_DATE = os.getenv("AUTO_WATCHLIST_DATE", "").strip()
-AUTO_WATCHLIST_LIMIT = 40
+AUTO_WATCHLIST_LIMIT = int(os.getenv("AUTO_WATCHLIST_LIMIT", "25"))
+AUTO_WATCHLIST_MIN_SCORE = float(os.getenv("AUTO_WATCHLIST_MIN_SCORE", "70"))
 MIN_AUTO_VOLUME = 2_000_000
 MIN_AUTO_CHANGE_PCT = 2.0
 MIN_STOCK_PRICE = 8

@@ -3,6 +3,8 @@ from unittest.mock import patch
 
 import alert_history
 
+from options_engine import OptionCandidate
+
 from swing_integration import (
     _hold_days_to_horizon_minutes,
     meets_swing_benchmark,
@@ -52,6 +54,32 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             "reasons": ["test reason"],
         }
 
+    def _valid_option_contract(self):
+        return OptionCandidate(
+            underlying="TEST",
+            contract_symbol="O:TEST260515C00105000",
+            option_type="CALL",
+            strike=105,
+            expiry="2026-05-15",
+            dte=7,
+            bid=1.2,
+            ask=1.3,
+            mid=1.25,
+            spread_pct=8.0,
+            delta=0.5,
+            gamma=0.01,
+            theta=-0.02,
+            implied_volatility=0.5,
+            volume=1000,
+            open_interest=5000,
+            status="OK",
+            reason="test valid option",
+            recommendation_score=70,
+            liquidity_score=60,
+            volume_oi_ratio=0.2,
+            dollar_volume=125000,
+        )
+
     def _reasoning(self):
         return {
             "decision": "A+",
@@ -72,6 +100,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
             patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.select_option_contract", return_value=self._valid_option_contract()), \
             patch("swing_integration.log_swing_alert") as log_swing_alert, \
             patch("swing_integration.track_outcome") as track_outcome:
             result = process_swing_candidate(Bot(), "TEST", {})
@@ -87,6 +116,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
             patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.select_option_contract", return_value=self._valid_option_contract()), \
             patch("swing_integration.log_swing_alert"), \
             patch("swing_integration.track_outcome"):
             result = process_swing_candidate(Bot(), "TEST", {})
@@ -101,6 +131,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
             patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.select_option_contract", return_value=self._valid_option_contract()), \
             patch("swing_integration.log_swing_alert") as log_swing_alert, \
             patch("swing_integration.track_outcome") as track_outcome:
             result = process_swing_candidate(Bot(), "TEST", {}, send_alert=False)
@@ -117,6 +148,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         setup = self._setup()
         setup["ai_reasoning"] = self._reasoning()
+        setup["option_contract"] = self._valid_option_contract().__dict__
 
         with patch("swing_integration.log_swing_alert") as log_swing_alert, \
             patch("swing_integration.track_outcome") as track_outcome, \
@@ -164,7 +196,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
             {"signal": "CALL", "price": 100},
             min_dte=7,
             max_dte=14,
-            allow_default_fallback=False,
+            allow_default_fallback=True,
         )
 
     def test_swing_benchmark_allows_elite_quality_filter_ai_reject_risk(self):

@@ -1027,8 +1027,7 @@ def _valid_data_candidate_from_chain_item(
     bid_float, ask_float, quote_midpoint = _quote_prices(item)
     mid = quote_midpoint or _mid_from_snapshot(item)
     spread = _spread_pct(bid_float, ask_float)
-    if _is_snapshot_stale(item):
-        return None
+    snapshot_is_stale = _is_snapshot_stale(item)
     if _contract_entry_price(bid_float, ask_float, mid) <= 0:
         return None
 
@@ -1051,6 +1050,11 @@ def _valid_data_candidate_from_chain_item(
     )
     dollar_volume = volume * (mid or 0.0) * 100
     option_label = "CALL" if option_type == "call" else "PUT"
+    stale_warning = (
+        " Snapshot timestamp is stale, so treat pricing as a fallback limit reference."
+        if snapshot_is_stale
+        else ""
+    )
     return OptionCandidate(
         underlying=symbol,
         contract_symbol=contract,
@@ -1071,7 +1075,8 @@ def _valid_data_candidate_from_chain_item(
         status="OK",
         reason=(
             f"{fallback_reason}: using valid {option_label} snapshot with positive pricing; "
-            f"strict liquidity/quality filters were not all met. OI {oi:,}, volume {volume:,}, "
+            f"strict liquidity/quality filters were not all met.{stale_warning} "
+            f"OI {oi:,}, volume {volume:,}, "
             f"volume/OI {volume_oi_ratio:.2f}, {distance_pct * 100:.1f}% from spot."
         ),
         recommendation_score=round(score, 2),

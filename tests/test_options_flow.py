@@ -159,6 +159,35 @@ class NextWeekSelectionClient:
         return []
 
 
+class StaleOnlyFallbackClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date", "2099-01-15")
+        stale_ns = int(
+            dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc).timestamp()
+            * 1_000_000_000
+        )
+        return [
+            {
+                "details": {
+                    "ticker": "O:XYZSTALEC00105000",
+                    "contract_type": "call",
+                    "strike_price": 105,
+                    "expiration_date": expiry,
+                },
+                "last_quote": {"bid": 1.2, "ask": 1.4, "sip_timestamp": stale_ns},
+                "day": {"volume": 25},
+                "open_interest": 50,
+                "greeks": {"delta": 0.35},
+                "implied_volatility": 0.6,
+            }
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class ValidDataFallbackClient:
     configured = True
 
@@ -649,6 +678,18 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertIn("Best available contract after strict filters skipped", candidate.reason)
         self.assertIn("strict liquidity/quality filters were not all met", candidate.reason)
 
+    def test_select_option_contract_uses_stale_positive_pricing_as_final_fallback(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=StaleOnlyFallbackClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZSTALEC00105000")
+        self.assertEqual(candidate.ask, 1.4)
+        self.assertIn("Snapshot timestamp is stale", candidate.reason)
 
     def test_recommend_option_contracts_rejects_timestamped_stale_snapshots(self):
         stale_ns = int(

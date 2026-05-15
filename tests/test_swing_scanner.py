@@ -60,6 +60,30 @@ class SwingScannerConfigTests(unittest.TestCase):
         self.assertIn("volume dry-up during base", reasons)
         self.assertIn("VCP volatility contraction", reasons)
 
+    def test_format_swing_alert_does_not_present_skip_as_option_recommendation(self):
+        message = swing_scanner.format_swing_alert(
+            "TEST",
+            {
+                "direction": "CALL",
+                "tier": "A",
+                "score": 90,
+                "entry": 100,
+                "stop": 95,
+                "target": 110,
+                "risk_reward": 2,
+                "hold_days": "2-10",
+                "reasons": ["benchmark"],
+                "option_contract": {
+                    "status": "SKIP",
+                    "reason": "No option passed filters",
+                },
+            },
+        )
+
+        self.assertNotIn("Option Recommendation: SKIP", message)
+        self.assertNotIn("No option passed filters", message)
+        self.assertNotIn("Recommended Contract", message)
+
     def test_atr_extension_and_failed_reclaim_penalize_late_breakouts(self):
         tech = {
             "price": 130,

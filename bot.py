@@ -46,7 +46,8 @@ def log_alert(row: Dict[str, Any]):
         "ai_verdict", "ai_confidence", "calibrated_confidence", "confidence_adjustment", "setup_quality", "entry_timing",
         "entry", "stop", "target", "risk_reward",
         "retest_confirmed", "late_breakout_risk", "ai_reason",
-        "price", "vwap", "ema9", "ema21", "ema50",
+        "price", "latest_price_time", "latest_regular_time", "intraday_data_source",
+        "intraday_data_delay_sec", "realtime_overlay_active", "vwap", "ema9", "ema21", "ema50",
         "dma20", "dma50", "dma200", "atr14",
         "trend_5m", "trend_15m", "orb_high", "orb_low",
         "premarket_high", "premarket_low", "prev_high", "prev_low",
@@ -479,7 +480,35 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             print(f"{ticker}: error {e}")
             return None
 
+
+    def refresh_alert_price(self, ticker, tech):
+        """Use a fresh entitled last trade for the displayed alert price when possible."""
+        realtime_trade = self.get_realtime_stock_trade(ticker)
+        if not realtime_trade:
+            return tech
+
+        now = dt.datetime.now(MARKET_TZ)
+        trade_ts = realtime_trade["timestamp"]
+        if trade_ts.date() != now.date():
+            return tech
+
+        if not (dt.time(9, 30) <= now.time() <= dt.time(16, 5)):
+            return tech
+
+        trade_age = (now - trade_ts).total_seconds()
+        if not (0 <= trade_age <= REALTIME_STOCK_MAX_AGE_SEC):
+            return tech
+
+        refreshed = dict(tech)
+        refreshed["price"] = realtime_trade["price"]
+        refreshed["latest_price_time"] = trade_ts.strftime("%H:%M")
+        refreshed["intraday_data_source"] = "realtime_trade_alert_refresh"
+        refreshed["intraday_data_delay_sec"] = int(trade_age)
+        refreshed["realtime_overlay_active"] = True
+        return refreshed
+
     def alert(self, ticker, setup, tech, ai, intraday_info=None, entry_mode="STANDARD", mode_reason="", ranking_score=0, options_flow=None):
+        tech = self.refresh_alert_price(ticker, tech)
         direction = setup["direction"]
         emoji = "🟢" if direction == "CALL" else "🔴"
         market = self.get_market_bias()
@@ -539,6 +568,10 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"━━━━━━━━━━━━━━━\n"
             f"📅 *Day:* {tech['trading_day']}\n"
             f"💰 *Price:* ${fmt_price(tech['price'])}\n"
+            f"🕒 *Price Source:* {tech.get('intraday_data_source', 'unknown')} "
+            f"@ {tech.get('latest_price_time') or 'n/a'} ET "
+            f"(delay {tech.get('intraday_data_delay_sec', 'n/a')}s, "
+            f"RT overlay {tech.get('realtime_overlay_active')})\n"
             f"⭐ *AI Score:* {setup['score']}/100 | *Rule:* {setup.get('rule_score')}\n"
             f"🏅 *Rank Score:* {ranking_score:.1f}\n"
             f"🎯 *Mode:* {entry_mode} — {mode_reason}\n"
@@ -601,6 +634,11 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "late_breakout_risk": ai["late_breakout_risk"],
             "ai_reason": ai["reason"],
             "price": tech["price"],
+            "latest_price_time": tech.get("latest_price_time"),
+            "latest_regular_time": tech.get("latest_regular_time"),
+            "intraday_data_source": tech.get("intraday_data_source"),
+            "intraday_data_delay_sec": tech.get("intraday_data_delay_sec"),
+            "realtime_overlay_active": tech.get("realtime_overlay_active"),
             "vwap": tech["vwap"],
             "ema9": tech["ema9"],
             "ema21": tech["ema21"],

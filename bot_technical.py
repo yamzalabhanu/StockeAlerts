@@ -645,6 +645,78 @@ class StockTechnicalBase:
             print(f"{ticker}: aggregate error {timespan}: {e}")
             return []
 
+    def _extract_realtime_timestamp(self, payload):
+        for key in (
+            "sip_timestamp",
+            "participant_timestamp",
+            "trf_timestamp",
+            "timestamp",
+            "t",
+        ):
+            value = safe_float(payload.get(key))
+            if value > 0:
+                if value > 1_000_000_000_000_000:
+                    value = value / 1_000_000_000
+                elif value > 1_000_000_000_000:
+                    value = value / 1000
+                return dt.datetime.fromtimestamp(value, tz=dt.timezone.utc)
+        return None
+
+    def get_realtime_stock_trade(self, ticker):
+        """Return the latest entitled stock trade from Polygon's last-trade endpoint."""
+        if not REALTIME_STOCK_OVERLAY_ENABLED or not POLYGON_API_KEY:
+            return None
+
+        try:
+            data = self._request_polygon_json(
+                f"https://api.polygon.io/v2/last/trade/{ticker}"
+            )
+        except Exception as e:
+            print(f"{ticker}: realtime trade lookup skipped: {e}")
+            return None
+
+        result = data.get("results") or data.get("last") or data
+        if not isinstance(result, dict):
+            return None
+
+        price = safe_float(result.get("price") or result.get("p"))
+        timestamp = self._extract_realtime_timestamp(result)
+        if price <= 0 or timestamp is None:
+            return None
+
+        return {
+            "price": price,
+            "timestamp": timestamp.astimezone(MARKET_TZ),
+            "size": safe_float(result.get("size") or result.get("s")),
+        }
+
+    def _eligible_realtime_overlay(self, trade, latest_regular_ts):
+        if not trade or not latest_regular_ts:
+            return False
+
+        now = dt.datetime.now(MARKET_TZ)
+        trade_ts = trade["timestamp"]
+        if trade_ts.date() != now.date():
+            return False
+
+        if not (dt.time(9, 30) <= now.time() <= dt.time(16, 5)):
+            return False
+
+        trade_age = (now - trade_ts).total_seconds()
+        aggregate_delay = (trade_ts - latest_regular_ts).total_seconds()
+        if not (0 <= trade_age <= REALTIME_STOCK_MAX_AGE_SEC):
+            return False
+
+        if REALTIME_STOCK_OVERLAY_REQUIRE_DELAY:
+            return aggregate_delay >= REALTIME_STOCK_DELAY_THRESHOLD_SEC
+
+        # Prefer a fresh entitled last trade for the alert price whenever it is not
+        # materially older than the latest aggregate.  Minute aggregate closes can
+        # differ from the broker-visible last trade inside the same minute, so using
+        # the fresh trade by default keeps Telegram prices aligned with live quotes
+        # instead of only fixing obviously delayed aggregates.
+        return aggregate_delay >= -REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC
+
     def build_daily_technical_context(self, ticker, daily, day):
         daily_closes = [safe_float(x.close) for x in daily if x.close is not None]
         daily_highs = [safe_float(x.high) for x in daily if x.high is not None]
@@ -739,6 +811,10 @@ class StockTechnicalBase:
             "last_5_closes": daily_closes[-5:],
             "last_5_lows": daily_lows[-5:],
             "last_5_highs": daily_highs[-5:],
+            "latest_price_time": None,
+            "intraday_data_source": "daily_aggregate",
+            "intraday_data_delay_sec": None,
+            "realtime_overlay_active": False,
             "intraday_available": False,
         }
 
@@ -957,12 +1033,27 @@ class StockTechnicalBase:
             self.tech_cache_time[ticker] = now_ts
             return daily_tech
 
+        latest_regular_ts = dt.datetime.fromtimestamp(
+            regular[-1].timestamp / 1000,
+            tz=dt.timezone.utc,
+        ).astimezone(MARKET_TZ)
+        realtime_trade = self.get_realtime_stock_trade(ticker)
+        realtime_overlay_active = self._eligible_realtime_overlay(
+            realtime_trade, latest_regular_ts
+        )
+        realtime_price = (
+            safe_float(realtime_trade.get("price"))
+            if realtime_overlay_active and realtime_trade
+            else None
+        )
+
         closes = [safe_float(x.close) for x in regular]
         volumes = [safe_float(x.volume) for x in regular]
+        indicator_closes = closes + ([realtime_price] if realtime_price else [])
 
-        ema9 = self.ema(closes, EMA_FAST)
-        ema21 = self.ema(closes, EMA_SLOW)
-        ema50 = self.ema(closes, EMA_TREND)
+        ema9 = self.ema(indicator_closes, EMA_FAST)
+        ema21 = self.ema(indicator_closes, EMA_SLOW)
+        ema50 = self.ema(indicator_closes, EMA_TREND)
 
         avg_20_volume = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else None
         current_volume = volumes[-1] if volumes else None
@@ -1001,11 +1092,21 @@ class StockTechnicalBase:
 
         bars_5m = self.aggregate_bars(regular, 5)
         bars_15m = self.aggregate_bars(regular, 15)
+        if realtime_price:
+            overlay_bar = {
+                "open": realtime_price,
+                "high": realtime_price,
+                "low": realtime_price,
+                "close": realtime_price,
+                "volume": safe_float(realtime_trade.get("size")) if realtime_trade else 0,
+            }
+            bars_5m = bars_5m + [overlay_bar]
+            bars_15m = bars_15m + [overlay_bar]
 
         trend_5m = self.timeframe_trend(bars_5m)
         trend_15m = self.timeframe_trend(bars_15m)
 
-        price = safe_float(regular[-1].close)
+        price = realtime_price or safe_float(regular[-1].close)
         extended_context = self._extended_session_context(
             afterhours,
             premarket,
@@ -1015,11 +1116,19 @@ class StockTechnicalBase:
             daily_tech.get("prev_low"),
         )
 
+        if realtime_price:
+            recent_high = max(recent_high, realtime_price) if recent_high is not None else realtime_price
+            recent_low = min(recent_low, realtime_price) if recent_low is not None else realtime_price
+
+        latest_price_ts = (
+            realtime_trade["timestamp"] if realtime_overlay_active and realtime_trade else latest_regular_ts
+        )
+        intraday_source = "realtime_trade_overlay" if realtime_price else "minute_aggregate"
+        intraday_delay_sec = int(
+            max((dt.datetime.now(MARKET_TZ) - latest_price_ts).total_seconds(), 0)
+        )
+
         tech = dict(daily_tech)
-        latest_regular_ts = dt.datetime.fromtimestamp(
-            regular[-1].timestamp / 1000,
-            tz=dt.timezone.utc,
-        ).astimezone(MARKET_TZ)
 
         tech.update(
             {
@@ -1047,13 +1156,41 @@ class StockTechnicalBase:
                 "intraday_avg_20_volume": avg_20_volume,
                 "regular_bars_count": len(regular),
                 "latest_regular_time": latest_regular_ts.strftime("%H:%M"),
-                "early_session_setup": self.is_early_session_time(latest_regular_ts),
-                "last_5_closes": [safe_float(x.close) for x in regular[-5:]],
-                "last_5_lows": [safe_float(x.low) for x in regular[-5:]],
-                "last_5_highs": [safe_float(x.high) for x in regular[-5:]],
-                "last_5_intraday_closes": [safe_float(x.close) for x in regular[-5:]],
-                "last_5_intraday_lows": [safe_float(x.low) for x in regular[-5:]],
-                "last_5_intraday_highs": [safe_float(x.high) for x in regular[-5:]],
+                "latest_price_time": latest_price_ts.strftime("%H:%M"),
+                "intraday_data_source": intraday_source,
+                "intraday_data_delay_sec": intraday_delay_sec,
+                "realtime_overlay_active": bool(realtime_price),
+                "early_session_setup": self.is_early_session_time(latest_price_ts),
+                "last_5_closes": (
+                    [safe_float(x.close) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.close) for x in regular[-5:]]
+                ),
+                "last_5_lows": (
+                    [safe_float(x.low) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.low) for x in regular[-5:]]
+                ),
+                "last_5_highs": (
+                    [safe_float(x.high) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.high) for x in regular[-5:]]
+                ),
+                "last_5_intraday_closes": (
+                    [safe_float(x.close) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.close) for x in regular[-5:]]
+                ),
+                "last_5_intraday_lows": (
+                    [safe_float(x.low) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.low) for x in regular[-5:]]
+                ),
+                "last_5_intraday_highs": (
+                    [safe_float(x.high) for x in regular[-4:]] + [realtime_price]
+                    if realtime_price
+                    else [safe_float(x.high) for x in regular[-5:]]
+                ),
                 "intraday_available": True,
                 **extended_context,
             }

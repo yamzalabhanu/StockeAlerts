@@ -6,6 +6,10 @@ from unittest.mock import patch
 import option_order_manager as manager
 
 
+def filled_buy_response(price, order_id="buy-order-id"):
+    return {"id": order_id, "status": "filled", "filled_avg_price": price, "filled_at": "2026-05-14T14:30:00Z"}
+
+
 class OptionOrderManagerTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -20,7 +24,7 @@ class OptionOrderManagerTests(unittest.TestCase):
         return True
 
     @patch("option_order_manager.broker.PAPER", True)
-    @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-123")
+    @patch("option_order_manager.broker.place_option_limit_order", return_value=filled_buy_response(2.45))
     def test_buys_recommended_option_in_paper_mode_and_sends_confirmation(self, place_order):
         position = manager.maybe_buy_recommended_option(
             ticker="SPY",
@@ -41,11 +45,14 @@ class OptionOrderManagerTests(unittest.TestCase):
         state = manager._load_state(self.state_path)
         tracked = state["positions"]["SPY260515C00500000"]
         self.assertEqual(tracked["submitted_price"], 2.5)
-        self.assertTrue(any("Submitted price tracked: $2.50" in msg for msg in self.telegram_messages))
-        self.assertTrue(any("check every 5 min; take profit +20% / stop -10%" in msg for msg in self.telegram_messages))
+        self.assertEqual(tracked["entry_premium"], 2.45)
+        self.assertEqual(tracked["filled_avg_price"], 2.45)
+        self.assertTrue(any("Submitted price: $2.50" in msg for msg in self.telegram_messages))
+        self.assertTrue(any("Filled price tracked: $2.45" in msg for msg in self.telegram_messages))
+        self.assertTrue(any("check every 5 min; take profit +50% / stop -50% from filled price" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
-    @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-456")
+    @patch("option_order_manager.broker.place_option_limit_order", return_value=filled_buy_response(0.56))
     def test_strips_polygon_option_prefix_before_buying(self, place_order):
         position = manager.maybe_buy_recommended_option(
             ticker="GLD",
@@ -80,6 +87,47 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertTrue(any("below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_skips_option_buy_when_any_available_premium_is_below_minimum(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={
+                "status": "OK",
+                "contract_symbol": "O:GLD260515C00457000",
+                "bid": 0.48,
+                "ask": 0.56,
+                "mid": 0.52,
+            },
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("bid $0.48 is below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order")
+    def test_skips_option_buy_when_nested_last_trade_is_below_minimum(self, place_order):
+        position = manager.maybe_buy_recommended_option(
+            ticker="GLD",
+            direction="CALL",
+            option_contract={
+                "status": "OK",
+                "contract_symbol": "O:GLD260515C00457000",
+                "ask": 0.56,
+                "last_trade": {"price": 0.47},
+            },
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+
+        self.assertIsNone(position)
+        place_order.assert_not_called()
+        self.assertTrue(any("last_trade.price $0.47 is below the $0.50 minimum premium" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
     @patch(
         "option_order_manager.broker.place_option_limit_order",
         return_value='Option order failed: {"code":42210000,"message":"asset not found"}',
@@ -101,7 +149,7 @@ class OptionOrderManagerTests(unittest.TestCase):
         self.assertFalse(any("Alpaca paper BUY submitted" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.broker.PAPER", True)
-    @patch("option_order_manager.broker.place_option_limit_order", return_value="sell-order-123")
+    @patch("option_order_manager.broker.place_option_limit_order", side_effect=[filled_buy_response(2.1), "sell-order-123"])
     def test_sells_open_option_at_profit_target_and_sends_confirmation(self, place_order):
         manager.maybe_buy_recommended_option(
             ticker="SPY",
@@ -116,20 +164,47 @@ class OptionOrderManagerTests(unittest.TestCase):
         closed = manager.manage_open_option_positions(
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
-            price_lookup={"SPY260515C00500000": 2.42},
+            price_lookup={"SPY260515C00500000": 3.16},
         )
 
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["exit_reason"], "TAKE_PROFIT")
-        self.assertEqual(closed[0]["current_premium"], 2.42)
-        self.assertEqual(closed[0]["last_pnl_pct"], 21.0)
+        self.assertEqual(closed[0]["current_premium"], 3.16)
+        self.assertEqual(closed[0]["last_pnl_pct"], 50.48)
         self.assertIsNotNone(closed[0]["last_checked_at"])
-        place_order.assert_called_once_with("SPY260515C00500000", 1, "SELL", 2.42)
+        self.assertEqual(place_order.call_args_list[-1].args, ("SPY260515C00500000", 1, "SELL", 3.16))
         self.assertTrue(any("Alpaca paper SELL submitted" in msg for msg in self.telegram_messages))
-        self.assertTrue(any("P/L: +21.00%" in msg for msg in self.telegram_messages))
+        self.assertTrue(any("P/L: +50.48%" in msg for msg in self.telegram_messages))
+
 
     @patch("option_order_manager.broker.PAPER", True)
-    @patch("option_order_manager.broker.place_option_limit_order", return_value="sell-order-456")
+    @patch("option_order_manager._alpaca_order_by_id", return_value=filled_buy_response(2.0))
+    @patch("option_order_manager.broker.place_option_limit_order", side_effect=[{"id": "pending-buy", "status": "new"}, "sell-order-321"])
+    def test_pending_buy_uses_filled_price_before_monitoring(self, place_order, fetch_order):
+        manager.maybe_buy_recommended_option(
+            ticker="SPY",
+            direction="CALL",
+            option_contract={"status": "OK", "contract_symbol": "SPY260515C00500000", "ask": 2.5},
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+        )
+        self.telegram_messages.clear()
+
+        closed = manager.manage_open_option_positions(
+            telegram_sender=self.send_telegram,
+            state_path=self.state_path,
+            price_lookup={"SPY260515C00500000": 3.0},
+        )
+
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["entry_premium"], 2.0)
+        self.assertEqual(closed[0]["filled_avg_price"], 2.0)
+        fetch_order.assert_called_once_with("pending-buy")
+        self.assertEqual(place_order.call_args_list[-1].args, ("SPY260515C00500000", 1, "SELL", 3.0))
+        self.assertTrue(any("BUY filled; monitoring actual fill price" in msg for msg in self.telegram_messages))
+
+    @patch("option_order_manager.broker.PAPER", True)
+    @patch("option_order_manager.broker.place_option_limit_order", side_effect=[filled_buy_response(3.0), "sell-order-456"])
     def test_sells_open_option_at_stop_loss(self, place_order):
         manager.maybe_buy_recommended_option(
             ticker="QQQ",
@@ -143,12 +218,12 @@ class OptionOrderManagerTests(unittest.TestCase):
         closed = manager.manage_open_option_positions(
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
-            price_lookup={"QQQ260515P00450000": 2.69},
+            price_lookup={"QQQ260515P00450000": 1.49},
         )
 
         self.assertEqual(len(closed), 1)
         self.assertEqual(closed[0]["exit_reason"], "STOP_LOSS")
-        place_order.assert_called_once_with("QQQ260515P00450000", 1, "SELL", 2.69)
+        self.assertEqual(place_order.call_args_list[-1].args, ("QQQ260515P00450000", 1, "SELL", 1.49))
 
     @patch("option_order_manager.broker.PAPER", True)
     @patch("option_order_manager.broker.place_option_limit_order", return_value="sell-order-789")
@@ -171,16 +246,16 @@ class OptionOrderManagerTests(unittest.TestCase):
         closed = manager.manage_open_option_positions(
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
-            price_lookup={"GLD260515C00457000": 0.32},
+            price_lookup={"GLD260515C00457000": 0.40},
         )
 
         self.assertEqual(len(closed), 1)
-        place_order.assert_called_once_with("GLD260515C00457000", 1, "SELL", 0.32)
+        place_order.assert_called_once_with("GLD260515C00457000", 1, "SELL", 0.4)
 
     @patch("option_order_manager.broker.PAPER", True)
     @patch(
         "option_order_manager.broker.place_option_limit_order",
-        side_effect=["buy-order-999", "Option order failed: insufficient qty"],
+        side_effect=[filled_buy_response(1.0), "Option order failed: insufficient qty"],
     )
     def test_keeps_position_open_when_managed_sell_fails(self, place_order):
         manager.maybe_buy_recommended_option(
@@ -195,7 +270,7 @@ class OptionOrderManagerTests(unittest.TestCase):
         closed = manager.manage_open_option_positions(
             telegram_sender=self.send_telegram,
             state_path=self.state_path,
-            price_lookup={"IWM260515C00200000": 1.21},
+            price_lookup={"IWM260515C00200000": 1.51},
         )
 
         self.assertEqual(closed, [])
@@ -203,8 +278,8 @@ class OptionOrderManagerTests(unittest.TestCase):
         state = manager._load_state(self.state_path)
         tracked = state["positions"]["IWM260515C00200000"]
         self.assertEqual(tracked["status"], "OPEN")
-        self.assertEqual(tracked["current_premium"], 1.21)
-        self.assertEqual(tracked["last_pnl_pct"], 21.0)
+        self.assertEqual(tracked["current_premium"], 1.51)
+        self.assertEqual(tracked["last_pnl_pct"], 51.0)
         self.assertTrue(any("SELL failed; position remains tracked as OPEN" in msg for msg in self.telegram_messages))
 
     @patch("option_order_manager.MAX_TRADES_PER_TRADING_DAY", 10)
@@ -231,7 +306,7 @@ class OptionOrderManagerTests(unittest.TestCase):
 
     @patch("option_order_manager.MAX_TRADES_PER_TRADING_DAY", 10)
     @patch("option_order_manager.broker.PAPER", True)
-    @patch("option_order_manager.broker.place_option_limit_order", return_value="buy-order-789")
+    @patch("option_order_manager.broker.place_option_limit_order", return_value=filled_buy_response(1.5))
     def test_records_successful_buy_against_daily_trade_count(self, place_order):
         with patch("option_order_manager._trading_day", return_value="2026-05-14"):
             position = manager.maybe_buy_recommended_option(

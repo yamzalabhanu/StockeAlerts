@@ -8,6 +8,27 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧯 Daily Trade Cap + Fill-Aware Options Automation
+
+Ranked alert delivery and automated option buys now share a market-local daily trade cap so the bot can finish a full scan, rank the best intraday/swing candidates, and still stop once the configured day limit is reached. The default cap is `10` trades per New York trading day, and the option order state keeps a per-day buy counter so restarted scans do not accidentally over-trade.
+
+Paper options automation is also fill-aware. Buy submissions can be tracked as pending until Alpaca reports an actual fill, then the manager records the broker `filled_avg_price`, `filled_at` timestamp, and `buy_order_id`. Profit targets and stop losses are calculated from the actual filled premium instead of the submitted limit price, and Telegram updates call out when a pending buy starts being monitored from the resolved fill price.
+
+Low-premium protection was tightened across both contract selection and order submission. The options selector rejects contracts below `MIN_OPTION_PREMIUM`, same-week fallback contracts must still pass that premium floor, and the order manager applies `MIN_OPTION_BUY_PREMIUM` before submitting a paper buy so sub-$0.50 contracts are skipped by default.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `MAX_TRADES_PER_TRADING_DAY=10` | Market-local daily cap shared by ranked alert selection and option buy automation |
+| `MIN_OPTION_PREMIUM=0.50` | Minimum option entry premium required by contract selection and fallback picks |
+| `MIN_OPTION_BUY_PREMIUM=0.50` | Minimum option limit price accepted by the Alpaca paper order manager |
+| `OPTION_PROFIT_TARGET_PCT=50` | Managed paper sell target measured from the actual filled premium |
+| `OPTION_STOP_LOSS_PCT=-50` | Managed paper stop measured from the actual filled premium |
+| `OPTION_ORDER_STATE_FILE=option_order_state.json` | Persists open/pending option positions, fill metadata, and daily trade counts |
+
+---
+
 ### 🧬 Swing Quality Blend + Relaxed Benchmark Gate
 
 Swing scoring now blends classic trend/momentum checks with institutional-style price-action evidence before a candidate reaches AI reasoning. The scorer can add or subtract weight for HH/HL or LH/LL structure, 9/21/50 EMA stage alignment, pivot/base breakouts or breakdowns, volume dry-up during bases, VCP contraction, retest holds/rejections, gap intent, ATR extension risk, and failed reclaim/rejection behavior. This gives pullback, breakout, and breakdown swings a richer score than simple moving-average alignment alone.
@@ -96,6 +117,7 @@ Key controls include:
 | `MAX_INTRADAY_ALERTS_PER_SCAN` | Maximum intraday alerts per completed scan, defaults to `5` |
 | `MAX_SWING_ALERTS_PER_SCAN` | Maximum swing alerts per completed scan, defaults to `5` |
 | `MAX_HIGH_QUALITY_ALERTS_PER_SCAN` | Optional quieter global cap, clamped by the per-type caps |
+| `MAX_TRADES_PER_TRADING_DAY` | Market-local daily cap for ranked trade alerts and option buys, defaults to `10` |
 | `ETF_ALERT_SYMBOLS` | Built-in ETF/sector ETF bucket used by ranked alert selection |
 
 ---
@@ -104,7 +126,9 @@ Key controls include:
 
 Recommended option contracts can now flow directly into Alpaca paper DAY limit orders when automation is enabled. The order manager normalizes Polygon/Massive symbols such as `O:SPY260515C00500000` into Alpaca-compatible OCC symbols, avoids duplicate open tracked positions, records state in `option_order_state.json`, and manages paper exits at the configured option premium profit target or stop loss. If Alpaca rejects an order or options access is unavailable, the scanner continues and sends a clear Telegram failure/skip message.
 
-For near-term trading, the contract selector can fall back to same-week high-liquidity contracts when they pass the high-volume guardrails, so paper orders can still be staged for actionable weekly contracts rather than failing because the default DTE window is too strict.
+For near-term trading, the contract selector can fall back to same-week high-liquidity contracts when they pass the high-volume, open-interest, spread, IV, DTE, and minimum-premium guardrails, so paper orders can still be staged for actionable weekly contracts rather than failing because the default DTE window is too strict. The order manager also blocks duplicate tracked positions, low-premium orders, and buys that would exceed the daily trade cap.
+
+Submitted option buys can be stored as `PENDING_FILL` until Alpaca returns a filled average price. Once the fill is available, monitoring switches to that broker-filled premium for both take-profit and stop-loss math.
 
 ---
 
@@ -386,7 +410,9 @@ The true options flow and liquidity engine can also use Polygon/Massive-compatib
 - IV expansion proxies
 - Delta imbalance and call/put premium imbalance
 
-Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, and `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`.
+Set `OPTIONS_API_KEY`, `MASSIVE_API_KEY`, or `POLYGON_API_KEY` to enable option recommendations and the flow scan. Optional controls include `OPTIONS_API_BASE_URL`, `MIN_OPTION_VOLUME`, `MIN_OPTION_OI`, `MAX_OPTION_SPREAD_PCT`, `TARGET_MIN_DELTA`, `TARGET_MAX_DELTA`, `OPTIONS_FLOW_EXPIRY_DAYS`, `OPTIONS_SWEEP_NOTIONAL_THRESHOLD`, `OPTIONS_PUT_WALL_OI_THRESHOLD`, `OPTIONS_GAMMA_SQUEEZE_MIN_SCORE`, and `OPTIONS_MAX_SNAPSHOT_AGE_SEC`.
+
+To reduce the practical impact of quote/aggregate drift, intraday stock technicals prefer Polygon's latest entitled stock trade whenever it is fresh and not materially older than the newest minute bar. The Telegram alert also refreshes the displayed price from the latest entitled trade immediately before sending, so the visible alert price is less likely to differ from broker quotes because of scan latency or same-minute aggregate closes. Enable or tune this with `REALTIME_STOCK_OVERLAY_ENABLED`, `REALTIME_STOCK_MAX_AGE_SEC`, `REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC`, and the legacy strict-delay controls `REALTIME_STOCK_OVERLAY_REQUIRE_DELAY` / `REALTIME_STOCK_DELAY_THRESHOLD_SEC`; alerts expose `intraday_data_source`, `latest_price_time`, `intraday_data_delay_sec`, and `realtime_overlay_active` so stale feeds are visible instead of silently affecting scores. Option recommendations also reject snapshots with quote/trade timestamps older than `OPTIONS_MAX_SNAPSHOT_AGE_SEC` while preserving fixtures/providers that do not expose timestamps.
 
 Theta risk control can recommend trimming or exiting contracts when decay risk becomes elevated.
 
@@ -946,6 +972,7 @@ EXTENDED_HOURS_MIN_VOLUME=100000
 MAX_INTRADAY_ALERTS_PER_SCAN=5
 MAX_SWING_ALERTS_PER_SCAN=5
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN=10
+MAX_TRADES_PER_TRADING_DAY=10
 
 # Optional options-flow providers and tuning
 OPTIONS_API_KEY=
@@ -958,6 +985,14 @@ OPTIONS_SWEEP_NOTIONAL_THRESHOLD=250000
 OPTIONS_BLOCK_NOTIONAL_THRESHOLD=500000
 OPTIONS_PUT_WALL_OI_THRESHOLD=5000
 OPTIONS_CALL_WALL_OI_THRESHOLD=5000
+OPTIONS_MAX_SNAPSHOT_AGE_SEC=900
+
+# Optional real-time stock last-trade overlay / alert price refresh
+REALTIME_STOCK_OVERLAY_ENABLED=true
+REALTIME_STOCK_MAX_AGE_SEC=90
+REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC=60
+REALTIME_STOCK_OVERLAY_REQUIRE_DELAY=false
+REALTIME_STOCK_DELAY_THRESHOLD_SEC=180
 OPTIONS_OI_BUILD_VOLUME_OI_RATIO=0.35
 OPTIONS_IV_EXPANSION_RATIO=1.15
 OPTIONS_DELTA_IMBALANCE_RATIO=1.75
@@ -970,6 +1005,7 @@ MAX_OPTION_SPREAD_PCT=12
 MAX_OPTION_IV=1.20
 TARGET_MIN_DELTA=0.35
 TARGET_MAX_DELTA=0.65
+MIN_OPTION_PREMIUM=0.50
 MIN_OPTION_DTE=7
 MAX_OPTION_DTE=45
 HIGH_VOLUME_OPTION_MIN_VOLUME=10000
@@ -979,8 +1015,9 @@ HIGH_VOLUME_OPTION_MIN_DTE=0
 ENABLE_AUTO_OPTION_TRADING=true
 AUTO_OPTION_PAPER_ONLY=true
 OPTION_CONTRACT_QTY=1
-OPTION_PROFIT_TARGET_PCT=20
-OPTION_STOP_LOSS_PCT=-10
+MIN_OPTION_BUY_PREMIUM=0.50
+OPTION_PROFIT_TARGET_PCT=50
+OPTION_STOP_LOSS_PCT=-50
 OPTION_PRICE_CHECK_INTERVAL_SEC=300
 OPTION_ORDER_STATE_FILE=option_order_state.json
 ```
@@ -1013,7 +1050,7 @@ OPTION_ORDER_STATE_FILE=option_order_state.json
 
 ### Paper Options Auto-Trading
 
-Recommended option contracts included in intraday and swing alerts can be submitted to Alpaca as paper limit orders. The bot tracks each submitted contract price, refreshes the latest option premium every five minutes by default, and submits a paper sell when the premium reaches the configured profit target or stop loss.
+Recommended option contracts included in intraday and swing alerts can be submitted to Alpaca as paper limit orders. The bot records submitted orders, resolves the actual broker fill price when available, refreshes the latest option premium every five minutes by default, and submits a paper sell when the premium reaches the configured profit target or stop loss measured from the filled entry.
 
 Environment controls:
 
@@ -1021,12 +1058,14 @@ Environment controls:
 - `AUTO_OPTION_PAPER_ONLY=true` blocks option automation if Alpaca is not in paper mode.
 - `ENABLE_AUTO_OPTION_TRADING=true` enables automated option buys from recommended contracts.
 - `OPTION_CONTRACT_QTY=1` sets the number of contracts per alert.
-- `OPTION_PROFIT_TARGET_PCT=20` submits the managed sell at +20% option P/L.
-- `OPTION_STOP_LOSS_PCT=-10` submits the managed sell at -10% option P/L.
+- `MIN_OPTION_BUY_PREMIUM=0.50` skips low-premium option orders before submission.
+- `MAX_TRADES_PER_TRADING_DAY=10` stops additional paper buys after the daily market-local trade cap is reached.
+- `OPTION_PROFIT_TARGET_PCT=50` submits the managed sell at +50% option P/L from the actual filled premium.
+- `OPTION_STOP_LOSS_PCT=-50` submits the managed sell at -50% option P/L from the actual filled premium.
 - `OPTION_PRICE_CHECK_INTERVAL_SEC=300` checks submitted option order prices every five minutes by default.
-- `OPTION_ORDER_STATE_FILE=option_order_state.json` stores tracked paper option positions between scans.
+- `OPTION_ORDER_STATE_FILE=option_order_state.json` stores tracked paper option positions, pending fills, broker fill metadata, and daily trade counts between scans.
 
-Telegram confirmations are sent for each paper buy submission, each paper sell submission, and any guardrail skip such as non-paper Alpaca mode.
+Telegram confirmations are sent for each paper buy submission, pending-fill resolution, paper sell submission, and any guardrail skip such as non-paper Alpaca mode, low premium, duplicate tracked contracts, or daily cap exhaustion.
 
 ## 📰 AI Sentiment Engine
 

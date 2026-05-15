@@ -19,7 +19,6 @@ OPTION_PROFIT_TARGET_PCT = float(os.getenv("OPTION_PROFIT_TARGET_PCT", "50"))
 
 OPTION_STOP_LOSS_PCT = float(os.getenv("OPTION_STOP_LOSS_PCT", "-50"))
 OPTION_PRICE_CHECK_INTERVAL_SEC = int(os.getenv("OPTION_PRICE_CHECK_INTERVAL_SEC", "300"))
-
 OPTION_ORDER_STATE_FILE = Path(os.getenv("OPTION_ORDER_STATE_FILE", "option_order_state.json"))
 
 TelegramSender = Optional[Callable[[str], bool]]

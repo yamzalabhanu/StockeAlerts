@@ -204,7 +204,7 @@ MASTER_WATCHLIST = [
     "NVDA","AMD","AVGO","TSM","MU","MRVL","QCOM","AMAT","LRCX",
     "KLAC","ASML","ADI","TXN","NXPI","MCHP","MPWR","ON","CRDO",
     "ALAB","AEHR","COHR","FORM","ONTO","TER","APH","CIEN",
-    "ANET","DELL","HPE","PSTG","WDC","STX","SNDK","INTC",
+    "ANET","DELL","HPE","CSCO","FPS","WDC","STX","SNDK","INTC",
 
     # Big Tech
     "AAPL","MSFT","META","AMZN","GOOGL","TSLA","NFLX","ORCL",
@@ -251,10 +251,12 @@ MASTER_WATCHLIST = [
     "ROKU","SNAP","PINS","UBER", "RKLB",
 ]
 
+
 # Static universe scanned on every cycle. Secondary/speculative symbols come in only
 # through the dynamic mover gate so the live bot targets ~40 core names + active movers
 # instead of scanning 150+ tickers continuously.
 BASE_WATCHLIST = list(dict.fromkeys(CORE_WATCHLIST))
+
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---
 # StockTechnicalBase.get_auto_watchlist() merges Polygon movers with BASE_WATCHLIST.
@@ -405,12 +407,12 @@ RANK_TOP_ALERTS_ONLY = True
 MAX_INTRADAY_ALERTS_PER_SCAN = int(os.getenv("MAX_INTRADAY_ALERTS_PER_SCAN", "5"))
 MAX_ALERTS_PER_SCAN = MAX_INTRADAY_ALERTS_PER_SCAN + MAX_SWING_ALERTS_PER_SCAN
 # Daily cap for trade signals/orders on the market-local trading day.
-MAX_TRADES_PER_TRADING_DAY = int(os.getenv("MAX_TRADES_PER_TRADING_DAY", "10"))
+MAX_TRADES_PER_TRADING_DAY = int(os.getenv("MAX_TRADES_PER_TRADING_DAY", "25"))
 # Optional quieter cap; values above MAX_ALERTS_PER_SCAN are clamped back to the per-type hard caps.
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN = int(os.getenv("MAX_HIGH_QUALITY_ALERTS_PER_SCAN", str(MAX_ALERTS_PER_SCAN)))
 
 QUALITY_WINDOWS = [
-    ("08:30", "11:30"),
+    ("09:30", "13:30"),
     ("13:30", "14:59"),
 ]
 

@@ -225,7 +225,7 @@ def apply_enhancements(bot_cls):
                         continue
 
                     if c.get("alert_type") == "INTRADAY":
-                        self.alert(
+                        alert_sent = self.alert(
                             c["ticker"],
                             c["setup"],
                             c["tech"],
@@ -235,9 +235,10 @@ def apply_enhancements(bot_cls):
                             c.get("mode_reason", ""),
                             c["ranking_score"],
                         )
-                        self.mark_alert(c["ticker"], c["setup"]["direction"])
-                        mark_alerted_today(c["ticker"])
-                        sent += 1
+                        if alert_sent:
+                            self.mark_alert(c["ticker"], c["setup"]["direction"])
+                            mark_alerted_today(c["ticker"])
+                            sent += 1
                     elif send_prepared_swing_candidate(self, c["ticker"], c["setup"], c["tech"]):
                         self._swing_alerts_sent_this_scan += 1
                         mark_alerted_today(c["ticker"])

@@ -18,7 +18,11 @@ from setup_filters import PASS, REJECT, WARNING
 from outcome_tracker import track_outcome
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
 from options_engine import analyze_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
-from option_order_manager import maybe_buy_recommended_option
+from option_order_manager import (
+    has_valid_option_contract_order_details,
+    missing_option_contract_order_details,
+    maybe_buy_recommended_option,
+)
 from alert_history import mark_alerted_today, was_alerted_today
 
 SWING_ALERT_CACHE = {}
@@ -337,6 +341,10 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
     alert_time = alert_time or time.time()
 
     telegram_sent = False
+    if not has_valid_option_contract_order_details(setup.get("option_contract") or {}):
+        print(f"{ticker}: swing alert blocked - missing valid option contract details")
+        return False
+
     try:
         message = format_swing_alert(ticker, setup)
         telegram_sent = bool(bot.send_telegram_msg(message))
@@ -495,13 +503,20 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
             {"signal": setup.get("direction"), "price": setup.get("price") or setup.get("entry")},
             min_dte=SWING_OPTION_MIN_DTE,
             max_dte=SWING_OPTION_MAX_DTE,
-            allow_default_fallback=False,
+            allow_default_fallback=True,
         )
         setup["option_contract"] = option_to_dict(option_contract)
-        if option_contract.status == "OK":
-            setup["score"] = round(min(100, float(setup.get("score", 0) or 0) + min(5, (option_contract.recommendation_score or 0) * 0.04)), 2)
+        missing_option_details = missing_option_contract_order_details(setup["option_contract"])
+        if missing_option_details:
+            print(
+                f"{ticker}: swing rejected - no orderable option contract "
+                f"({', '.join(missing_option_details)})"
+            )
+            return None
+        setup["score"] = round(min(100, float(setup.get("score", 0) or 0) + min(5, (option_contract.recommendation_score or 0) * 0.04)), 2)
     except Exception as e:
-        print(f"{ticker}: swing options flow/contract selection skipped: {e}")
+        print(f"{ticker}: swing rejected - option contract selection failed: {e}")
+        return None
 
     setup["ranking_score"] = swing_ranking_score(setup)
 

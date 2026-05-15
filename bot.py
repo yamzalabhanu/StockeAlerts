@@ -24,7 +24,9 @@ from daily_report_engine import send_daily_learning_report
 from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
 from option_order_manager import (
     OPTION_PRICE_CHECK_INTERVAL_SEC,
+    has_valid_option_contract_order_details,
     manage_open_option_positions,
+    missing_option_contract_order_details,
     maybe_buy_recommended_option,
 )
 from alert_history import mark_alerted_today, was_alerted_today
@@ -451,10 +453,17 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 {"signal": best.get("direction"), "price": ai.get("entry") or tech.get("price")},
             )
             best["option_contract"] = option_to_dict(option_contract)
-            if option_contract.status == "OK":
-                ranking_score += min(10, (option_contract.recommendation_score or 0) * 0.08)
+            missing_option_details = missing_option_contract_order_details(best["option_contract"])
+            if missing_option_details:
+                print(
+                    f"{ticker}: rejected - no orderable option contract "
+                    f"({', '.join(missing_option_details)})"
+                )
+                return None
+            ranking_score += min(10, (option_contract.recommendation_score or 0) * 0.08)
         except Exception as e:
-            print(f"{ticker}: option contract selection skipped: {e}")
+            print(f"{ticker}: rejected - option contract selection failed: {e}")
+            return None
 
         return {
             "ticker": ticker,
@@ -546,13 +555,16 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         )
         option_contract_text = ""
         if option_contract:
+            if not has_valid_option_contract_order_details(option_contract):
+                print(f"{ticker}: alert blocked - missing valid option contract details")
+                return False
             if isinstance(option_contract, dict):
                 option_contract_text = format_recommended_option_contract(
                     option_contract,
                     direction=direction,
                     entry=ai.get("entry"),
                     target=ai.get("target"),
-                    include_skip_reason=True,
+                    include_skip_reason=False,
                 )
             else:
                 option_contract_text = format_recommended_option_contract(
@@ -560,8 +572,11 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     direction=direction,
                     entry=ai.get("entry"),
                     target=ai.get("target"),
-                    include_skip_reason=True,
+                    include_skip_reason=False,
                 )
+        else:
+            print(f"{ticker}: alert blocked - no option contract recommendation")
+            return False
 
         msg = (
             f"{emoji} *{entry_mode} {direction} SETUP: {ticker}*\n"
@@ -601,7 +616,10 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🌎 *ETF Details:* {', '.join(market['details'])}"
         )
 
-        self.send_telegram_msg(msg)
+        telegram_sent = bool(self.send_telegram_msg(msg))
+        if not telegram_sent:
+            print(f"{ticker}: telegram send failed; intraday alert not counted or ordered")
+            return False
 
         maybe_buy_recommended_option(
             ticker=ticker,
@@ -699,6 +717,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             if outcome:
                 print(f"{ticker}: outcome={outcome['result']} max_gain={outcome['max_gain_pct']}% max_loss={outcome['max_loss_pct']}%")
 
+        return True
+
 
     def maybe_manage_option_positions(self, *, force=False):
         now = dt.datetime.now(dt.timezone.utc)
@@ -763,7 +783,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 selected = candidates[:MAX_ALERTS_PER_SCAN] if RANK_TOP_ALERTS_ONLY else candidates
 
                 for c in selected:
-                    self.alert(
+                    alert_sent = self.alert(
                         c["ticker"],
                         c["setup"],
                         c["tech"],
@@ -774,7 +794,8 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                         c["ranking_score"],
                         c.get("options_flow"),
                     )
-                    self.mark_alert(c["ticker"], c["setup"]["direction"])
+                    if alert_sent:
+                        self.mark_alert(c["ticker"], c["setup"]["direction"])
 
                 print(f"✅ Scan complete | candidates={len(candidates)} | sent={len(selected)} | sleeping {SCAN_INTERVAL_SEC}s")
                 await self.sleep_with_option_management(SCAN_INTERVAL_SEC)

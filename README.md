@@ -8,13 +8,32 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### ⚡ Real-Time Alert Price Refresh + Stale Data Guardrails
+
+Intraday alerts now reduce quote/aggregate drift by using Polygon's latest entitled stock trade in two places: technical context can overlay a fresh last trade when it is not materially older than the newest minute aggregate, and the alert sender refreshes the displayed Telegram price again immediately before delivery. This makes the visible alert entry less likely to lag broker quotes because of scan latency, delayed aggregates, or same-minute aggregate closes.
+
+The overlay is transparent in every alert payload: `intraday_data_source`, `latest_price_time`, `intraday_data_delay_sec`, and `realtime_overlay_active` show whether the price came from minute aggregates, the technical overlay, or the final alert refresh. Option snapshots also enforce timestamp freshness with `OPTIONS_MAX_SNAPSHOT_AGE_SEC` when quote/trade timestamps are available, while test fixtures and providers without timestamp metadata continue to work.
+
+Key controls include:
+
+| Setting | Purpose |
+|---|---|
+| `REALTIME_STOCK_OVERLAY_ENABLED=true` | Enables fresh last-trade overlays for intraday technicals and alert-price refreshes |
+| `REALTIME_STOCK_MAX_AGE_SEC=90` | Maximum age accepted for an entitled stock last trade |
+| `REALTIME_STOCK_AGGREGATE_STALENESS_TOLERANCE_SEC=60` | Allows a last trade when it is fresh and not materially older than the newest aggregate |
+| `REALTIME_STOCK_OVERLAY_REQUIRE_DELAY=false` | Optional legacy mode that only overlays when the aggregate feed is delayed |
+| `REALTIME_STOCK_DELAY_THRESHOLD_SEC=180` | Delay threshold used by the legacy strict-delay overlay mode |
+| `OPTIONS_MAX_SNAPSHOT_AGE_SEC=900` | Rejects stale option snapshot quote/trade data when timestamps are available |
+
+---
+
 ### 🧯 Daily Trade Cap + Fill-Aware Options Automation
 
 Ranked alert delivery and automated option buys now share a market-local daily trade cap so the bot can finish a full scan, rank the best intraday/swing candidates, and still stop once the configured day limit is reached. The default cap is `10` trades per New York trading day, and the option order state keeps a per-day buy counter so restarted scans do not accidentally over-trade.
 
 Paper options automation is also fill-aware. Buy submissions can be tracked as pending until Alpaca reports an actual fill, then the manager records the broker `filled_avg_price`, `filled_at` timestamp, and `buy_order_id`. Profit targets and stop losses are calculated from the actual filled premium instead of the submitted limit price, and Telegram updates call out when a pending buy starts being monitored from the resolved fill price.
 
-Low-premium protection was tightened across both contract selection and order submission. The options selector rejects contracts below `MIN_OPTION_PREMIUM`, same-week fallback contracts must still pass that premium floor, and the order manager applies `MIN_OPTION_BUY_PREMIUM` before submitting a paper buy so sub-$0.50 contracts are skipped by default.
+Low-premium protection was tightened across both contract selection and order submission. The options selector rejects contracts below `MIN_OPTION_PREMIUM`, same-week fallback contracts must still pass that premium floor, and the order manager applies `MIN_OPTION_BUY_PREMIUM` before submitting a paper buy so sub-$0.50 contracts are skipped by default. The buy guard now checks every available positive premium reference (`ask`, `mid`, `bid`, `mark`, `last`, nested quote/trade fields, day close, and VWAP) instead of trusting only the submitted limit price, which prevents orders when any live premium source has already slipped below the configured floor.
 
 Key controls include:
 

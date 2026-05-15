@@ -859,8 +859,9 @@ def _default_otm_candidate_from_chain_item(
     item: dict[str, Any],
     price: float,
     fallback_expiry: str = "",
+    fallback_label: str = "same-week",
 ) -> Optional[OptionCandidate]:
-    """Build a same-week 5% OTM fallback candidate without liquidity filters."""
+    """Build a 5% OTM fallback candidate without strict liquidity filters."""
     details = item.get("details", {}) or {}
     strike = _strike(details)
     contract = _option_ticker(details)
@@ -916,11 +917,69 @@ def _default_otm_candidate_from_chain_item(
         volume=volume,
         open_interest=oi,
         status="OK",
-        reason=f"Default fallback after SKIP: buy same-week {pct_label} OTM {option_label} contract",
+        reason=f"Default fallback after SKIP: buy {fallback_label} {pct_label} OTM {option_label} contract",
         recommendation_score=0.0,
         liquidity_score=0.0,
         volume_oi_ratio=round(volume / max(oi, 1), 3) if oi is not None else None,
         dollar_volume=round(dollar_volume, 2),
+    )
+
+
+def _select_default_otm_candidate(
+    symbol: str,
+    option_type: str,
+    price: float,
+    api: OptionsApiClient,
+    *,
+    min_dte: int = 0,
+    max_dte: int = 6,
+) -> Optional[OptionCandidate]:
+    """Select the nearest +5% call or -5% put contract for SKIP fallbacks."""
+    if price <= 0 or option_type not in {"call", "put"}:
+        return None
+
+    expiries = _next_fridays(min_dte=min_dte, max_dte=max_dte)
+    if not expiries:
+        return None
+
+    target_strike = price * (1.05 if option_type == "call" else 0.95)
+    candidates: list[OptionCandidate] = []
+    fallback_label = "same-week" if min_dte <= 0 else f"{min_dte}-{max_dte} DTE"
+
+    for expiry in expiries:
+        try:
+            results = api.option_snapshots(
+                symbol,
+                expiration_date=expiry,
+                contract_type=option_type,
+                limit=250,
+            )
+        except Exception:
+            continue
+
+        for item in results:
+            candidate = _default_otm_candidate_from_chain_item(
+                symbol,
+                option_type,
+                item,
+                price,
+                fallback_expiry=expiry,
+                fallback_label=fallback_label,
+            )
+            if candidate:
+                candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    return min(
+        candidates,
+        key=lambda candidate: (
+            abs(candidate.strike - target_strike),
+            candidate.dte,
+            -float(candidate.volume or 0),
+            -float(candidate.open_interest or 0),
+        ),
     )
 
 
@@ -930,43 +989,8 @@ def _select_same_week_default_candidate(
     price: float,
     api: OptionsApiClient,
 ) -> Optional[OptionCandidate]:
-    """Select the nearest same-week +5% call or -5% put contract for SKIP fallbacks."""
-    if price <= 0 or option_type not in {"call", "put"}:
-        return None
-
-    expiries = _next_fridays(min_dte=0, max_dte=6)
-    expiry = expiries[0] if expiries else ""
-    if not expiry:
-        return None
-
-    target_strike = price * (1.05 if option_type == "call" else 0.95)
-    try:
-        results = api.option_snapshots(
-            symbol,
-            expiration_date=expiry,
-            contract_type=option_type,
-            limit=250,
-        )
-    except Exception:
-        return None
-
-    candidates: list[OptionCandidate] = []
-    for item in results:
-        candidate = _default_otm_candidate_from_chain_item(symbol, option_type, item, price, fallback_expiry=expiry)
-        if candidate:
-            candidates.append(candidate)
-
-    if not candidates:
-        return None
-
-    return min(
-        candidates,
-        key=lambda candidate: (
-            abs(candidate.strike - target_strike),
-            -float(candidate.volume or 0),
-            -float(candidate.open_interest or 0),
-        ),
-    )
+    """Backward-compatible same-week default fallback selector."""
+    return _select_default_otm_candidate(symbol, option_type, price, api, min_dte=0, max_dte=6)
 
 def _option_candidate_rank(candidate: OptionCandidate) -> tuple[float, ...]:
     """Rank candidates by raw volume and OI first, then quality tie-breakers.
@@ -1165,7 +1189,14 @@ def select_option_contract(
         return best
 
     if allow_default_fallback:
-        default_candidate = _select_same_week_default_candidate(symbol, option_type, price, api)
+        default_candidate = _select_default_otm_candidate(
+            symbol,
+            option_type,
+            price,
+            api,
+            min_dte=effective_min_dte,
+            max_dte=effective_max_dte,
+        )
         if default_candidate:
             return default_candidate
 

@@ -298,6 +298,32 @@ def _resolve_filled_entry_price(position: dict[str, Any], *, symbol: str) -> tup
     return 0.0, None
 
 
+
+
+def missing_option_contract_order_details(option_contract: Mapping[str, Any] | Any) -> list[str]:
+    """Return missing fields that make a recommendation unsuitable for alerts/orders."""
+    contract = _contract_dict(option_contract)
+    missing: list[str] = []
+    if contract.get("status") != "OK":
+        missing.append("status=OK")
+    if not str(contract.get("contract_symbol") or "").strip():
+        missing.append("contract_symbol")
+    if str(contract.get("option_type") or "").upper() not in {"CALL", "PUT"}:
+        missing.append("option_type")
+    if _safe_float(contract.get("strike")) <= 0:
+        missing.append("strike")
+    if not str(contract.get("expiry") or "").strip():
+        missing.append("expiry")
+    if _safe_float(contract.get("ask") or contract.get("mid")) <= 0:
+        missing.append("ask_or_mid")
+    return missing
+
+
+def has_valid_option_contract_order_details(option_contract: Mapping[str, Any] | Any) -> bool:
+    """Return True only when an option recommendation has orderable contract details."""
+    return not missing_option_contract_order_details(option_contract)
+
+
 def maybe_buy_recommended_option(
     *,
     ticker: str,

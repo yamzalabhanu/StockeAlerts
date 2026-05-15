@@ -15,16 +15,17 @@ MASSIVE_API_KEY = normalize_api_key(os.getenv("MASSIVE_API_KEY")) or POLYGON_API
 OPTIONS_API_KEY = normalize_api_key(os.getenv("OPTIONS_API_KEY")) or MASSIVE_API_KEY
 OPTIONS_API_BASE_URL = os.getenv("OPTIONS_API_BASE_URL", "https://api.polygon.io").rstrip("/")
 
-MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "1000"))
-MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "5000"))
+MIN_OPTION_VOLUME = int(os.getenv("MIN_OPTION_VOLUME", "50"))
+MIN_OPTION_OI = int(os.getenv("MIN_OPTION_OI", "100"))
+REQUIRE_OPTION_LIQUIDITY_FIELDS = os.getenv("REQUIRE_OPTION_LIQUIDITY_FIELDS", "false").lower() == "true"
 MAX_SPREAD_PCT = float(os.getenv("MAX_OPTION_SPREAD_PCT", "12"))
 MAX_IV = float(os.getenv("MAX_OPTION_IV", "1.20"))
 MIN_OPTION_PREMIUM = float(os.getenv("MIN_OPTION_PREMIUM", "0.50"))
-TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.35"))
-TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.65"))
+TARGET_MIN_DELTA = float(os.getenv("TARGET_MIN_DELTA", "0.40"))
+TARGET_MAX_DELTA = float(os.getenv("TARGET_MAX_DELTA", "0.55"))
 MIN_DTE = int(os.getenv("MIN_OPTION_DTE", "7"))
 MAX_DTE = int(os.getenv("MAX_OPTION_DTE", "45"))
-HIGH_VOLUME_OPTION_MIN_VOLUME = int(os.getenv("HIGH_VOLUME_OPTION_MIN_VOLUME", str(MIN_OPTION_VOLUME * 10)))
+HIGH_VOLUME_OPTION_MIN_VOLUME = int(os.getenv("HIGH_VOLUME_OPTION_MIN_VOLUME", "10000"))
 HIGH_VOLUME_OPTION_MIN_DTE = int(os.getenv("HIGH_VOLUME_OPTION_MIN_DTE", "0"))
 
 FLOW_EXPIRY_DAYS = int(os.getenv("OPTIONS_FLOW_EXPIRY_DAYS", "45"))
@@ -38,7 +39,7 @@ OI_BUILD_VOLUME_OI_RATIO = float(os.getenv("OPTIONS_OI_BUILD_VOLUME_OI_RATIO", "
 IV_EXPANSION_RATIO = float(os.getenv("OPTIONS_IV_EXPANSION_RATIO", "1.15"))
 DELTA_IMBALANCE_RATIO = float(os.getenv("OPTIONS_DELTA_IMBALANCE_RATIO", "1.75"))
 GAMMA_SQUEEZE_MIN_SCORE = int(os.getenv("OPTIONS_GAMMA_SQUEEZE_MIN_SCORE", "70"))
-OPTIONS_MAX_SNAPSHOT_AGE_SEC = int(os.getenv("OPTIONS_MAX_SNAPSHOT_AGE_SEC", "900"))
+OPTIONS_MAX_SNAPSHOT_AGE_SEC = int(os.getenv("OPTIONS_MAX_SNAPSHOT_AGE_SEC", "30"))
 
 
 @dataclass
@@ -180,15 +181,37 @@ def _strike(details: dict[str, Any]) -> float:
     return _safe_float(details.get("strike_price"))
 
 
+def _last_trade_price(item: dict[str, Any]) -> Optional[float]:
+    trade = item.get("last_trade", {}) or {}
+    for key in ("price", "p", "last_price"):
+        value = trade.get(key)
+        if value is not None:
+            price = _safe_float(value)
+            if price > 0:
+                return price
+    return None
+
+
+def _day_close_price(item: dict[str, Any]) -> Optional[float]:
+    day = item.get("day", {}) or {}
+    for key in ("close", "last_price", "c", "vwap"):
+        value = day.get(key)
+        if value is not None:
+            price = _safe_float(value)
+            if price > 0:
+                return price
+    return None
+
+
 def _mid_from_snapshot(item: dict[str, Any]) -> Optional[float]:
     quote = item.get("last_quote", {}) or {}
     bid = quote.get("bid")
     ask = quote.get("ask")
     if bid is not None and ask is not None:
-        return (_safe_float(bid) + _safe_float(ask)) / 2
-    day = item.get("day", {}) or {}
-    close = day.get("close") or day.get("last_price")
-    return _safe_float(close) if close is not None else None
+        mid = (_safe_float(bid) + _safe_float(ask)) / 2
+        if mid > 0:
+            return mid
+    return _last_trade_price(item) or _day_close_price(item)
 
 
 def _snapshot_volume(item: dict[str, Any]) -> int:
@@ -288,13 +311,21 @@ def _passes_dte_filter(
     return _is_exceptional_volume(volume) and exceptional_min_dte <= dte <= upper_bound
 
 
+def _passes_volume_filter(volume: int) -> bool:
+    if volume >= MIN_OPTION_VOLUME:
+        return True
+    return not REQUIRE_OPTION_LIQUIDITY_FIELDS and volume <= 0
+
+
 def _passes_oi_filter(volume: int, oi: int) -> bool:
-    return oi >= MIN_OPTION_OI or _is_exceptional_volume(volume)
+    if oi >= MIN_OPTION_OI or _is_exceptional_volume(volume):
+        return True
+    return not REQUIRE_OPTION_LIQUIDITY_FIELDS and oi <= 0
 
 
 def _option_recommendation_reason(oi: int, volume: int, volume_oi_ratio: float, distance_pct: float, dte: int) -> str:
     qualifiers = []
-    if _is_exceptional_volume(volume) and oi < MIN_OPTION_OI:
+    if _is_exceptional_volume(volume) and oi <= MIN_OPTION_OI:
         qualifiers.append("exceptional same-day volume overrode stale/low OI")
     if _is_exceptional_volume(volume) and dte < MIN_DTE:
         qualifiers.append("exceptional same-day volume allowed near-term expiry")
@@ -804,7 +835,7 @@ def _candidate_from_chain_item(
         return None, "spread"
     if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
         return None, "premium"
-    if volume < MIN_OPTION_VOLUME:
+    if not _passes_volume_filter(volume):
         return None, "volume"
     if not _passes_oi_filter(volume, oi):
         return None, "oi"
@@ -925,6 +956,93 @@ def _default_otm_candidate_from_chain_item(
     )
 
 
+def _valid_data_candidate_from_chain_item(
+    symbol: str,
+    option_type: str,
+    item: dict[str, Any],
+    price: float,
+    fallback_expiry: str = "",
+    fallback_reason: str = "Best available contract after strict filters skipped",
+) -> Optional[OptionCandidate]:
+    """Build a fallback candidate when a snapshot has enough data for an alert/order."""
+    details = item.get("details", {}) or {}
+    strike = _strike(details)
+    contract = _option_ticker(details)
+    exp = _expiration_date(details) or fallback_expiry
+    contract_type = _option_type(details) or option_type
+    if not contract or not strike or not exp:
+        return None
+    if contract_type and contract_type != option_type:
+        return None
+
+    try:
+        dte = (datetime.fromisoformat(exp).date() - datetime.now(timezone.utc).date()).days
+    except ValueError:
+        return None
+    if dte < 0:
+        return None
+
+    quote = item.get("last_quote", {}) or {}
+    bid = quote.get("bid")
+    ask = quote.get("ask")
+    bid_float = _safe_float(bid) if bid is not None else None
+    ask_float = _safe_float(ask) if ask is not None else None
+    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    spread = _spread_pct(bid_float, ask_float)
+    if _is_snapshot_stale(item):
+        return None
+    if _contract_entry_price(bid_float, ask_float, mid) <= 0:
+        return None
+
+    greeks = item.get("greeks", {}) or {}
+    delta = greeks.get("delta")
+    gamma = greeks.get("gamma")
+    theta = greeks.get("theta")
+    iv = item.get("implied_volatility")
+    volume = _snapshot_volume(item)
+    oi = _snapshot_open_interest(item)
+    score, liquidity_score, volume_oi_ratio, distance_pct = _score_option_candidate(
+        strike=strike,
+        price=price,
+        volume=volume,
+        oi=oi,
+        spread=spread,
+        delta=_safe_float(delta) if delta is not None else None,
+        iv=_safe_float(iv) if iv is not None else None,
+        mid=mid,
+    )
+    dollar_volume = volume * (mid or 0.0) * 100
+    option_label = "CALL" if option_type == "call" else "PUT"
+    return OptionCandidate(
+        underlying=symbol,
+        contract_symbol=contract,
+        option_type=option_label,
+        strike=strike,
+        expiry=exp,
+        dte=dte,
+        bid=bid_float,
+        ask=ask_float,
+        mid=round(mid, 2) if mid else None,
+        spread_pct=round(spread, 2) if spread is not None else None,
+        delta=round(_safe_float(delta), 3) if delta is not None else None,
+        gamma=round(_safe_float(gamma), 4) if gamma is not None else None,
+        theta=round(_safe_float(theta), 4) if theta is not None else None,
+        implied_volatility=round(_safe_float(iv), 3) if iv is not None else None,
+        volume=volume,
+        open_interest=oi,
+        status="OK",
+        reason=(
+            f"{fallback_reason}: using valid {option_label} snapshot with positive pricing; "
+            f"strict liquidity/quality filters were not all met. OI {oi:,}, volume {volume:,}, "
+            f"volume/OI {volume_oi_ratio:.2f}, {distance_pct * 100:.1f}% from spot."
+        ),
+        recommendation_score=round(score, 2),
+        liquidity_score=round(liquidity_score, 2),
+        volume_oi_ratio=round(volume_oi_ratio, 3),
+        dollar_volume=round(dollar_volume, 2),
+    )
+
+
 def _select_default_otm_candidate(
     symbol: str,
     option_type: str,
@@ -979,6 +1097,61 @@ def _select_default_otm_candidate(
             candidate.dte,
             -float(candidate.volume or 0),
             -float(candidate.open_interest or 0),
+        ),
+    )
+
+
+def _select_best_available_candidate(
+    symbol: str,
+    option_type: str,
+    price: float,
+    api: OptionsApiClient,
+    *,
+    min_dte: int = 0,
+    max_dte: int = MAX_DTE,
+) -> Optional[OptionCandidate]:
+    """Select any valid same-side snapshot with positive pricing as a final fallback."""
+    if price <= 0 or option_type not in {"call", "put"}:
+        return None
+
+    expiries = _next_fridays(min_dte=min(0, min_dte), max_dte=max_dte)
+    candidates: list[OptionCandidate] = []
+    target_strike = price * (1.05 if option_type == "call" else 0.95)
+
+    for expiry in expiries:
+        try:
+            results = api.option_snapshots(
+                symbol,
+                expiration_date=expiry,
+                contract_type=option_type,
+                limit=250,
+            )
+        except Exception:
+            continue
+
+        for item in results:
+            candidate = _valid_data_candidate_from_chain_item(
+                symbol,
+                option_type,
+                item,
+                price,
+                fallback_expiry=expiry,
+            )
+            if candidate:
+                candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    return max(
+        candidates,
+        key=lambda candidate: (
+            candidate.dollar_volume or 0.0,
+            candidate.volume or 0,
+            candidate.open_interest or 0,
+            -(abs(candidate.strike - target_strike)),
+            -(candidate.spread_pct or MAX_SPREAD_PCT),
+            -candidate.dte,
         ),
     )
 
@@ -1132,7 +1305,7 @@ def select_option_contract(
             if _contract_entry_price(bid_float, ask_float, mid) < MIN_OPTION_PREMIUM:
                 rejection_counts["premium"] += 1
                 continue
-            if volume < MIN_OPTION_VOLUME:
+            if not _passes_volume_filter(volume):
                 rejection_counts["volume"] += 1
                 continue
             if not _passes_oi_filter(volume, oi):
@@ -1200,13 +1373,24 @@ def select_option_contract(
         if default_candidate:
             return default_candidate
 
+        best_available_candidate = _select_best_available_candidate(
+            symbol,
+            option_type,
+            price,
+            api,
+            min_dte=effective_min_dte,
+            max_dte=effective_max_dte,
+        )
+        if best_available_candidate:
+            return best_available_candidate
+
     rejection_text = ", ".join(f"{name}={count}" for name, count in rejection_counts.items() if count)
     suffix = f" ({rejection_text})" if rejection_text else ""
     return _empty_option_candidate(
         symbol,
         option_type,
         "SKIP",
-        f"No option passed high-volume/high-OI, minimum premium, spread, DTE, and IV filters{suffix}; same-week 5% OTM fallback unavailable",
+        f"No option passed high-volume/high-OI, minimum premium, spread, DTE, and IV filters{suffix}; configured 5% OTM fallback unavailable",
     )
 
 

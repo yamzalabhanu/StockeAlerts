@@ -153,9 +153,15 @@ def build_reasoning_report(
         warnings.extend((execution.get("warnings") or [])[:2])
 
     elif ex_quality:
+        strong_intraday_mode = setup.get("entry_mode") in {"BREAKOUT", "RETEST", "MOMENTUM"}
+        retest_or_approved = bool(setup.get("retest_confirmed") or setup.get("entry_mode") == "RETEST")
         if early_session_setup and high_quality_intraday:
             score -= 4
             warnings.append("Early-session liquidity warning allowed while volume/spread data is still forming")
+            warnings.extend((execution.get("warnings") or [])[:3])
+        elif high_quality_intraday and strong_intraday_mode and retest_or_approved:
+            score -= 6
+            warnings.append("Execution BAD softened for high-quality confirmed intraday setup")
             warnings.extend((execution.get("warnings") or [])[:3])
         else:
             score -= 18

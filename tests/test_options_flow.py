@@ -131,6 +131,62 @@ class ThinSameWeekClient:
         return []
 
 
+class NextWeekSelectionClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date")
+        return [
+            {
+                "details": {"ticker": "O:XYZNEXTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
+                "last_quote": {"bid": 4.9, "ask": 5.1},
+                "day": {"volume": 1500},
+                "open_interest": 9000,
+                "greeks": {"delta": 0.52},
+                "implied_volatility": 0.55,
+            },
+            {
+                "details": {"ticker": "O:XYZNEXTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 2.4, "ask": 2.6},
+                "day": {"volume": 12000},
+                "open_interest": 8000,
+                "greeks": {"delta": 0.45},
+                "implied_volatility": 0.6,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
+class ValidDataFallbackClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date", "2099-01-15")
+        return [
+            {
+                "details": {"ticker": "O:XYZFALLC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 0.08, "ask": 0.12},
+                "day": {"volume": 25},
+                "open_interest": 12,
+                "greeks": {"delta": 0.22},
+                "implied_volatility": 1.8,
+            },
+            {
+                "details": {"ticker": "O:XYZFALLC00110000", "contract_type": "call", "strike_price": 110, "expiration_date": expiry},
+                "last_quote": {"bid": 0.04, "ask": 0.06},
+                "day": {"volume": 10},
+                "open_interest": 5,
+                "greeks": {"delta": 0.12},
+                "implied_volatility": 1.6,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class MissingOptionsClient:
     configured = False
 
@@ -181,6 +237,24 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertGreater(candidate.liquidity_score, 0)
         self.assertAlmostEqual(candidate.volume_oi_ratio, round(20000 / 100, 3))
         self.assertIn("exceptional same-day volume", candidate.reason)
+
+    def test_select_option_contract_can_target_next_week_highest_volume_contract(self):
+        next_week = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=7)).isoformat()
+        with patch("options_engine._next_fridays", return_value=[next_week]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 101},
+                client=NextWeekSelectionClient(),
+                min_dte=7,
+                max_dte=14,
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.expiry, next_week)
+        self.assertEqual(candidate.dte, 7)
+        self.assertEqual(candidate.contract_symbol, "O:XYZNEXTC00105000")
+        self.assertEqual(candidate.volume, 12000)
 
     def test_recommend_option_contracts_from_chain_ranks_by_volume_and_oi(self):
         chain = [
@@ -288,7 +362,11 @@ class OptionsFlowTests(unittest.TestCase):
             },
         ]
 
-        with patch("options_engine.MIN_DTE", 1), patch("options_engine.MAX_DTE", 30000):
+        with patch("options_engine.MIN_DTE", 1), \
+            patch("options_engine.MAX_DTE", 30000), \
+            patch("options_engine.MIN_OPTION_VOLUME", 1000), \
+            patch("options_engine.MIN_OPTION_OI", 5000), \
+            patch("options_engine.HIGH_VOLUME_OPTION_MIN_VOLUME", 10000):
             candidates = recommend_option_contracts_from_chain(
                 "XYZ",
                 chain,
@@ -322,7 +400,10 @@ class OptionsFlowTests(unittest.TestCase):
             },
         ]
 
-        with patch("options_engine.MIN_DTE", 27000), patch("options_engine.MAX_DTE", 30000):
+        with patch("options_engine.MIN_DTE", 27000), \
+            patch("options_engine.MAX_DTE", 30000), \
+            patch("options_engine.MIN_OPTION_OI", 5000), \
+            patch("options_engine.HIGH_VOLUME_OPTION_MIN_VOLUME", 10000):
             candidates = recommend_option_contracts_from_chain(
                 "XYZ",
                 chain,
@@ -431,6 +512,41 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(candidates[0].volume, 8000)
         self.assertEqual(candidates[0].open_interest, 25000)
 
+    def test_select_option_contract_uses_last_trade_when_quote_missing(self):
+        class LastTradeOnlyClient:
+            configured = True
+
+            def option_snapshots(self, underlying, **params):
+                expiry = params.get("expiration_date", "2099-01-15")
+                return [
+                    {
+                        "details": {"ticker": "O:XYZLASTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
+                        "last_trade": {"price": 2.35},
+                        "day": {"volume": 75},
+                        "open_interest": 150,
+                        "greeks": {"delta": 0.46},
+                        "implied_volatility": 0.5,
+                    }
+                ]
+
+            def option_trades(self, option_ticker, **params):
+                return []
+
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]), \
+            patch("options_engine.MIN_DTE", 1), \
+            patch("options_engine.MAX_DTE", 30000):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=LastTradeOnlyClient(),
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZLASTC00100000")
+        self.assertEqual(candidate.mid, 2.35)
+
+
     def test_select_option_contract_defaults_to_same_week_five_percent_call_after_skip(self):
         with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
             candidate = select_option_contract(
@@ -458,6 +574,20 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(candidate.strike, 95)
         self.assertEqual(candidate.expiry, "2099-01-15")
         self.assertIn("same-week -5% OTM PUT", candidate.reason)
+
+    def test_select_option_contract_uses_best_available_valid_snapshot_after_all_strict_fallbacks_skip(self):
+        with patch("options_engine._next_fridays", return_value=["2099-01-15"]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 100},
+                client=ValidDataFallbackClient(),
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.contract_symbol, "O:XYZFALLC00105000")
+        self.assertEqual(candidate.ask, 0.12)
+        self.assertIn("Best available contract after strict filters skipped", candidate.reason)
+        self.assertIn("strict liquidity/quality filters were not all met", candidate.reason)
 
 
     def test_recommend_option_contracts_rejects_timestamped_stale_snapshots(self):

@@ -73,6 +73,12 @@ SWING_ATR_TARGET_MULTIPLIER = 4.0
 
 MAX_SWING_ALERTS_PER_SCAN = int(os.getenv("MAX_SWING_ALERTS_PER_SCAN", "5"))
 
+# Intraday option recommendations/orders should favor 0DTE through the next
+# weekly expiry and rank eligible Polygon snapshots by same-day volume first.
+INTRADAY_OPTION_MIN_DTE = int(os.getenv("INTRADAY_OPTION_MIN_DTE", "0"))
+INTRADAY_OPTION_MAX_DTE = int(os.getenv("INTRADAY_OPTION_MAX_DTE", "7"))
+INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK = os.getenv("INTRADAY_OPTION_ALLOW_DEFAULT_FALLBACK", "true").lower() == "true"
+
 # --- RISK MANAGEMENT ---
 ACCOUNT_SIZE = 100000
 RISK_PER_TRADE_PCT = 0.01
@@ -352,6 +358,7 @@ ORB_MINUTES = 15
 MIN_CALL_SCORE = 75
 MIN_PUT_SCORE = 75
 MIN_AI_CONFIDENCE = 75
+HIGH_QUALITY_RETEST_AI_CONFIDENCE = int(os.getenv("HIGH_QUALITY_RETEST_AI_CONFIDENCE", "65"))
 
 # Early-session setups often form before a full sample of intraday volume,
 # retest, and liquidity data is available. These controls keep valid opening

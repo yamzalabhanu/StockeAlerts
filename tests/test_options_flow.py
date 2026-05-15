@@ -131,6 +131,34 @@ class ThinSameWeekClient:
         return []
 
 
+class NextWeekSelectionClient:
+    configured = True
+
+    def option_snapshots(self, underlying, **params):
+        expiry = params.get("expiration_date")
+        return [
+            {
+                "details": {"ticker": "O:XYZNEXTC00100000", "contract_type": "call", "strike_price": 100, "expiration_date": expiry},
+                "last_quote": {"bid": 4.9, "ask": 5.1},
+                "day": {"volume": 1500},
+                "open_interest": 9000,
+                "greeks": {"delta": 0.52},
+                "implied_volatility": 0.55,
+            },
+            {
+                "details": {"ticker": "O:XYZNEXTC00105000", "contract_type": "call", "strike_price": 105, "expiration_date": expiry},
+                "last_quote": {"bid": 2.4, "ask": 2.6},
+                "day": {"volume": 12000},
+                "open_interest": 8000,
+                "greeks": {"delta": 0.45},
+                "implied_volatility": 0.6,
+            },
+        ]
+
+    def option_trades(self, option_ticker, **params):
+        return []
+
+
 class MissingOptionsClient:
     configured = False
 
@@ -181,6 +209,24 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertGreater(candidate.liquidity_score, 0)
         self.assertAlmostEqual(candidate.volume_oi_ratio, round(20000 / 100, 3))
         self.assertIn("exceptional same-day volume", candidate.reason)
+
+    def test_select_option_contract_can_target_next_week_highest_volume_contract(self):
+        next_week = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=7)).isoformat()
+        with patch("options_engine._next_fridays", return_value=[next_week]):
+            candidate = select_option_contract(
+                "XYZ",
+                {"signal": "CALL", "price": 101},
+                client=NextWeekSelectionClient(),
+                min_dte=7,
+                max_dte=14,
+                allow_default_fallback=False,
+            )
+
+        self.assertEqual(candidate.status, "OK")
+        self.assertEqual(candidate.expiry, next_week)
+        self.assertEqual(candidate.dte, 7)
+        self.assertEqual(candidate.contract_symbol, "O:XYZNEXTC00105000")
+        self.assertEqual(candidate.volume, 12000)
 
     def test_recommend_option_contracts_from_chain_ranks_by_volume_and_oi(self):
         chain = [

@@ -148,6 +148,44 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _first_present(mapping: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        value = mapping.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _quote_bid(quote: dict[str, Any]) -> Any:
+    return _first_present(quote, "bid", "bid_price", "bidPrice", "bp")
+
+
+def _quote_ask(quote: dict[str, Any]) -> Any:
+    return _first_present(quote, "ask", "ask_price", "askPrice", "ap")
+
+
+def _quote_midpoint(quote: dict[str, Any]) -> Optional[float]:
+    value = _first_present(quote, "midpoint", "mid", "mark", "mark_price", "markPrice")
+    if value is None:
+        return None
+    midpoint = _safe_float(value)
+    return midpoint if midpoint > 0 else None
+
+
+def _quote_prices(item: dict[str, Any]) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    quote = item.get("last_quote", {}) or {}
+    bid = _quote_bid(quote)
+    ask = _quote_ask(quote)
+    bid_float = _safe_float(bid) if bid is not None else None
+    ask_float = _safe_float(ask) if ask is not None else None
+    midpoint = (
+        (bid_float + ask_float) / 2
+        if bid_float is not None and ask_float is not None
+        else _quote_midpoint(quote)
+    )
+    return bid_float, ask_float, midpoint
+
+
 def _contract_entry_price(bid: Optional[float], ask: Optional[float], mid: Optional[float]) -> float:
     """Return the premium that would be used for a buy entry."""
     if ask is not None and ask > 0:
@@ -166,19 +204,33 @@ def _round_or_none(value: Optional[float], ndigits: int = 2) -> Optional[float]:
 
 
 def _option_type(details: dict[str, Any]) -> str:
-    return str(details.get("contract_type") or details.get("type") or "").lower()
+    return str(
+        _first_present(details, "contract_type", "contractType", "type", "option_type", "optionType")
+        or ""
+    ).lower()
 
 
 def _option_ticker(details: dict[str, Any]) -> str:
-    return str(details.get("ticker") or details.get("symbol") or "")
+    return str(
+        _first_present(
+            details,
+            "ticker",
+            "symbol",
+            "contract_symbol",
+            "contractSymbol",
+            "option_symbol",
+            "optionSymbol",
+        )
+        or ""
+    )
 
 
 def _expiration_date(details: dict[str, Any]) -> str:
-    return str(details.get("expiration_date") or "")
+    return str(_first_present(details, "expiration_date", "expirationDate", "expiry", "expiration") or "")
 
 
 def _strike(details: dict[str, Any]) -> float:
-    return _safe_float(details.get("strike_price"))
+    return _safe_float(_first_present(details, "strike_price", "strikePrice", "strike"))
 
 
 def _last_trade_price(item: dict[str, Any]) -> Optional[float]:
@@ -204,14 +256,12 @@ def _day_close_price(item: dict[str, Any]) -> Optional[float]:
 
 
 def _mid_from_snapshot(item: dict[str, Any]) -> Optional[float]:
-    quote = item.get("last_quote", {}) or {}
-    bid = quote.get("bid")
-    ask = quote.get("ask")
-    if bid is not None and ask is not None:
-        mid = (_safe_float(bid) + _safe_float(ask)) / 2
+    bid_float, ask_float, midpoint = _quote_prices(item)
+    if bid_float is not None and ask_float is not None:
+        mid = (bid_float + ask_float) / 2
         if mid > 0:
             return mid
-    return _last_trade_price(item) or _day_close_price(item)
+    return midpoint or _last_trade_price(item) or _day_close_price(item)
 
 
 def _snapshot_volume(item: dict[str, Any]) -> int:
@@ -810,12 +860,8 @@ def _candidate_from_chain_item(
     except ValueError:
         return None, "dte"
 
-    quote = item.get("last_quote", {}) or {}
-    bid = quote.get("bid")
-    ask = quote.get("ask")
-    bid_float = _safe_float(bid) if bid is not None else None
-    ask_float = _safe_float(ask) if ask is not None else None
-    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    bid_float, ask_float, quote_midpoint = _quote_prices(item)
+    mid = quote_midpoint or _mid_from_snapshot(item)
     spread = _spread_pct(bid_float, ask_float)
 
     greeks = item.get("greeks", {}) or {}
@@ -908,12 +954,8 @@ def _default_otm_candidate_from_chain_item(
     except ValueError:
         return None
 
-    quote = item.get("last_quote", {}) or {}
-    bid = quote.get("bid")
-    ask = quote.get("ask")
-    bid_float = _safe_float(bid) if bid is not None else None
-    ask_float = _safe_float(ask) if ask is not None else None
-    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    bid_float, ask_float, quote_midpoint = _quote_prices(item)
+    mid = quote_midpoint or _mid_from_snapshot(item)
     spread = _spread_pct(bid_float, ask_float)
     greeks = item.get("greeks", {}) or {}
     delta = greeks.get("delta")
@@ -982,12 +1024,8 @@ def _valid_data_candidate_from_chain_item(
     if dte < 0:
         return None
 
-    quote = item.get("last_quote", {}) or {}
-    bid = quote.get("bid")
-    ask = quote.get("ask")
-    bid_float = _safe_float(bid) if bid is not None else None
-    ask_float = _safe_float(ask) if ask is not None else None
-    mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+    bid_float, ask_float, quote_midpoint = _quote_prices(item)
+    mid = quote_midpoint or _mid_from_snapshot(item)
     spread = _spread_pct(bid_float, ask_float)
     if _is_snapshot_stale(item):
         return None
@@ -1276,12 +1314,8 @@ def select_option_contract(
             except ValueError:
                 dte = (datetime.fromisoformat(expiry).date() - datetime.now(timezone.utc).date()).days
 
-            quote = item.get("last_quote", {}) or {}
-            bid = quote.get("bid")
-            ask = quote.get("ask")
-            bid_float = _safe_float(bid) if bid is not None else None
-            ask_float = _safe_float(ask) if ask is not None else None
-            mid = ((bid_float + ask_float) / 2) if bid_float is not None and ask_float is not None else _mid_from_snapshot(item)
+            bid_float, ask_float, quote_midpoint = _quote_prices(item)
+            mid = quote_midpoint or _mid_from_snapshot(item)
             spread = _spread_pct(bid_float, ask_float)
 
             greeks = item.get("greeks", {}) or {}

@@ -1047,12 +1047,13 @@ def format_swing_alert(ticker: str, setup: Dict) -> str:
     )
     option_contract_line = ""
     if option_contract:
+        # Do not present a non-orderable SKIP result as an option recommendation in user alerts.
         option_contract_line = format_recommended_option_contract(
             option_contract,
             direction=setup.get("direction", ""),
             entry=setup.get("entry"),
             target=setup.get("target"),
-            include_skip_reason=True,
+            include_skip_reason=False,
         ).lstrip("\n")
 
     return (

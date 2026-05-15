@@ -10,6 +10,7 @@ from swing_integration import (
     meets_swing_benchmark,
     process_swing_candidate,
     send_prepared_swing_candidate,
+    SWING_ALERT_CACHE,
     swing_benchmark_reject_reasons,
     swing_ranking_score,
 )
@@ -36,10 +37,12 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
     def setUp(self):
         alert_history._ALERTED_TICKERS_BY_DAY.clear()
         alert_history._LOADED_LOG_DAYS.add(alert_history.alert_day())
+        SWING_ALERT_CACHE.clear()
 
     def tearDown(self):
         alert_history._ALERTED_TICKERS_BY_DAY.clear()
         alert_history._LOADED_LOG_DAYS.clear()
+        SWING_ALERT_CACHE.clear()
 
     def _setup(self):
         return {
@@ -124,6 +127,45 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["direction"], "CALL")
 
+
+    def test_process_swing_candidate_does_not_reject_when_option_contract_is_missing(self):
+        class Bot:
+            def send_telegram_msg(self, _message):
+                return True
+
+        missing_option = OptionCandidate(
+            underlying="TEST",
+            contract_symbol="",
+            option_type="CALL",
+            strike=0,
+            expiry="",
+            dte=0,
+            bid=None,
+            ask=None,
+            mid=None,
+            spread_pct=None,
+            delta=None,
+            gamma=None,
+            theta=None,
+            implied_volatility=None,
+            volume=None,
+            open_interest=None,
+            status="SKIP",
+            reason="No option passed filters",
+        )
+
+        with patch("swing_integration.score_swing_setup", return_value=self._setup()), \
+            patch("swing_integration.build_reasoning_report", return_value=self._reasoning()), \
+            patch("swing_integration.select_option_contract", return_value=missing_option), \
+            patch("swing_integration.log_swing_alert"), \
+            patch("swing_integration.track_outcome"), \
+            patch("swing_integration.maybe_buy_recommended_option") as maybe_buy:
+            result = process_swing_candidate(Bot(), "TEST", {})
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["option_contract"]["status"], "SKIP")
+        maybe_buy.assert_not_called()
+
     def test_process_swing_candidate_can_defer_telegram_until_ranked_scan_selection(self):
         class Bot:
             def send_telegram_msg(self, _message):
@@ -158,6 +200,27 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         self.assertTrue(sent)
         log_swing_alert.assert_called_once()
         track_outcome.assert_called_once()
+
+
+    def test_send_prepared_swing_candidate_sends_alert_without_orderable_option(self):
+        class Bot:
+            def send_telegram_msg(self, _message):
+                return True
+
+        setup = self._setup()
+        setup["ai_reasoning"] = self._reasoning()
+        setup["option_contract"] = {"status": "SKIP", "reason": "No eligible option"}
+
+        with patch("swing_integration.log_swing_alert") as log_swing_alert, \
+            patch("swing_integration.track_outcome") as track_outcome, \
+            patch("swing_integration.maybe_buy_recommended_option") as maybe_buy, \
+            patch.dict("swing_integration.SWING_ALERT_CACHE", {}, clear=True):
+            sent = send_prepared_swing_candidate(Bot(), "TEST", setup, {}, alert_time=123)
+
+        self.assertTrue(sent)
+        log_swing_alert.assert_called_once()
+        track_outcome.assert_called_once()
+        maybe_buy.assert_not_called()
 
     def test_swing_ranking_prefers_better_quality_setups(self):
         lower = self._setup()

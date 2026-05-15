@@ -341,20 +341,26 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
     alert_time = alert_time or time.time()
 
     telegram_sent = False
-    if not has_valid_option_contract_order_details(setup.get("option_contract") or {}):
-        print(f"{ticker}: swing alert blocked - missing valid option contract details")
-        return False
+    option_contract = setup.get("option_contract") or {}
+    has_orderable_option = has_valid_option_contract_order_details(option_contract)
+    if not has_orderable_option:
+        missing_option_details = missing_option_contract_order_details(option_contract)
+        print(
+            f"{ticker}: swing alert continuing without orderable option contract "
+            f"({', '.join(missing_option_details)})"
+        )
 
     try:
         message = format_swing_alert(ticker, setup)
         telegram_sent = bool(bot.send_telegram_msg(message))
         if telegram_sent:
-            maybe_buy_recommended_option(
-                ticker=ticker,
-                direction=setup.get("direction"),
-                option_contract=setup.get("option_contract") or {},
-                telegram_sender=bot.send_telegram_msg,
-            )
+            if has_orderable_option:
+                maybe_buy_recommended_option(
+                    ticker=ticker,
+                    direction=setup.get("direction"),
+                    option_contract=option_contract,
+                    telegram_sender=bot.send_telegram_msg,
+                )
             SWING_ALERT_CACHE[ticker] = alert_time
             mark_alerted_today(ticker)
         else:
@@ -509,14 +515,21 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
         missing_option_details = missing_option_contract_order_details(setup["option_contract"])
         if missing_option_details:
             print(
-                f"{ticker}: swing rejected - no orderable option contract "
+                f"{ticker}: swing continuing without orderable option contract "
                 f"({', '.join(missing_option_details)})"
             )
-            return None
-        setup["score"] = round(min(100, float(setup.get("score", 0) or 0) + min(5, (option_contract.recommendation_score or 0) * 0.04)), 2)
+        else:
+            option_score_bonus = min(5, (option_contract.recommendation_score or 0) * 0.04)
+            setup["score"] = round(
+                min(100, float(setup.get("score", 0) or 0) + option_score_bonus),
+                2,
+            )
     except Exception as e:
-        print(f"{ticker}: swing rejected - option contract selection failed: {e}")
-        return None
+        print(f"{ticker}: swing option contract selection skipped: {e}")
+        setup["option_contract"] = {
+            "status": "SKIP",
+            "reason": f"Option contract selection failed: {e}",
+        }
 
     setup["ranking_score"] = swing_ranking_score(setup)
 

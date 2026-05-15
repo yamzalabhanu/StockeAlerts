@@ -209,6 +209,35 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
 
+    def test_swing_benchmark_accepts_elite_mixed_mtf_with_momentum_confirmation(self):
+        setup = self._setup()
+        setup["reasons"] = [
+            "base breakout through pivot resistance",
+            "breakout retest held",
+        ]
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 95
+        reasoning["mtf"]["structure"] = "MIXED_ALIGNMENT"
+        tech = {"adx": 23, "rel_volume": 1.9}
+
+        self.assertTrue(meets_swing_benchmark(setup, reasoning, tech))
+
+    def test_swing_benchmark_mixed_mtf_override_requires_momentum_confirmation(self):
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 95
+        reasoning["mtf"]["structure"] = "MIXED_ALIGNMENT"
+        tech = {"adx": 22, "rel_volume": 1.9, "candle_body_pct": 65}
+
+        self.assertFalse(meets_swing_benchmark(self._setup(), reasoning, tech))
+
+    def test_swing_benchmark_accepts_elite_mixed_mtf_with_strong_candle_body(self):
+        reasoning = self._reasoning()
+        reasoning["final_score"] = 95
+        reasoning["mtf"]["structure"] = "MIXED_ALIGNMENT"
+        tech = {"adx": 23, "rel_volume": 1.9, "candle_body_pct": 65}
+
+        self.assertTrue(meets_swing_benchmark(self._setup(), reasoning, tech))
+
     def test_swing_benchmark_accepts_high_quality_a_setup(self):
         setup = self._setup()
         setup["risk_reward"] = 1.8

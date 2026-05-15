@@ -33,6 +33,10 @@ SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECT}
 SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
 SWING_ALLOWED_MTF_STRUCTURES = {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
 SWING_MIXED_REGIME_ELITE_SCORE = 100
+SWING_MIXED_MTF_ELITE_SCORE = 95
+SWING_MIXED_MTF_MIN_ADX = 22
+SWING_MIXED_MTF_MIN_REL_VOLUME = 1.8
+SWING_MIXED_MTF_MIN_BODY_PCT = 0.6
 SWING_OPTION_MIN_DTE = 7
 SWING_OPTION_MAX_DTE = 14
 
@@ -65,7 +69,82 @@ def _regime_matches_swing_direction(regime, required_regime, decision, composite
     )
 
 
-def swing_benchmark_reject_reasons(setup, reasoning):
+def _truthy_benchmark_flag(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "confirmed", "held", "pass"}
+    return bool(value)
+
+
+def _body_pct_fraction(value):
+    body_pct = safe_float(value)
+    if body_pct > 1:
+        body_pct /= 100
+    return body_pct
+
+
+def _swing_price_action_confirmed(setup, tech):
+    setup = setup or {}
+    tech = tech or {}
+    reasons_text = " ".join(str(reason).lower() for reason in setup.get("reasons") or [])
+
+    body_pct = max(
+        _body_pct_fraction(tech.get("candle_body_pct")),
+        _body_pct_fraction(tech.get("body_pct")),
+        _body_pct_fraction(setup.get("candle_body_pct")),
+        _body_pct_fraction(setup.get("body_pct")),
+    )
+    strong_body = body_pct >= SWING_MIXED_MTF_MIN_BODY_PCT
+
+    breakout_confirmed = any(
+        _truthy_benchmark_flag(value)
+        for value in (
+            tech.get("breakout_confirmed"),
+            tech.get("breakout"),
+            setup.get("breakout_confirmed"),
+            setup.get("breakout"),
+        )
+    ) or "breakout" in reasons_text or "breakdown" in reasons_text
+
+    retest_confirmed = any(
+        _truthy_benchmark_flag(value)
+        for value in (
+            tech.get("retest_confirmed"),
+            tech.get("retest_hold"),
+            setup.get("retest_confirmed"),
+            setup.get("retest_hold"),
+        )
+    ) or "retest" in reasons_text
+
+    return strong_body or (breakout_confirmed and retest_confirmed)
+
+
+def _allows_mixed_mtf_swing(setup, reasoning, tech, regime_aligned):
+    """Allow elite A+ swing setups through a mixed-MTF gate when momentum confirms."""
+    setup = setup or {}
+    reasoning = reasoning or {}
+    tech = tech or {}
+
+    composite_score = safe_float(reasoning.get("final_score") or setup.get("score"))
+    decision = reasoning.get("decision") or setup.get("decision")
+    adx = safe_float(tech.get("adx") or setup.get("adx"))
+    rel_volume = safe_float(
+        tech.get("rel_volume")
+        or tech.get("relative_volume")
+        or setup.get("rel_volume")
+        or setup.get("relative_volume")
+    )
+
+    return (
+        composite_score >= SWING_MIXED_MTF_ELITE_SCORE
+        and decision == "A+"
+        and regime_aligned
+        and adx > SWING_MIXED_MTF_MIN_ADX
+        and rel_volume > SWING_MIXED_MTF_MIN_REL_VOLUME
+        and _swing_price_action_confirmed(setup, tech)
+    )
+
+
+def swing_benchmark_reject_reasons(setup, reasoning, tech=None):
     """Return human-readable reasons why a swing setup misses the benchmark."""
     setup = setup or {}
     reasoning = reasoning or {}
@@ -94,16 +173,20 @@ def swing_benchmark_reject_reasons(setup, reasoning):
 
     regime = (reasoning.get("regime") or {}).get("regime")
     required_regime = SWING_DIRECTION_REGIMES.get(direction)
-    if required_regime and not _regime_matches_swing_direction(
+    regime_aligned = _regime_matches_swing_direction(
         regime,
         required_regime,
         decision,
         composite_score,
-    ):
+    )
+    if required_regime and not regime_aligned:
         reasons.append(f"regime {regime or 'missing'} is not {required_regime}")
 
     mtf_structure = (reasoning.get("mtf") or {}).get("structure")
-    if mtf_structure not in SWING_ALLOWED_MTF_STRUCTURES:
+    if mtf_structure not in SWING_ALLOWED_MTF_STRUCTURES and not (
+        mtf_structure == "MIXED_ALIGNMENT"
+        and _allows_mixed_mtf_swing(setup, reasoning, tech, regime_aligned)
+    ):
         allowed = "/".join(sorted(SWING_ALLOWED_MTF_STRUCTURES))
         reasons.append(f"MTF {mtf_structure or 'missing'} is not {allowed}")
 
@@ -125,9 +208,9 @@ def swing_benchmark_reject_reasons(setup, reasoning):
     return reasons
 
 
-def meets_swing_benchmark(setup, reasoning):
+def meets_swing_benchmark(setup, reasoning, tech=None):
     """Return True for high-quality swing alerts that pass the relaxed benchmark."""
-    return not swing_benchmark_reject_reasons(setup, reasoning)
+    return not swing_benchmark_reject_reasons(setup, reasoning, tech)
 
 
 def _hold_days_to_horizon_minutes(hold_days, default_days=SWING_HOLD_DAYS_MAX):
@@ -354,7 +437,7 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
         setup["score"] = reasoning.get("final_score", setup.get("score", 0))
         setup["decision"] = reasoning.get("decision", setup.get("tier", "WATCH"))
 
-        benchmark_reject_reasons = swing_benchmark_reject_reasons(setup, reasoning)
+        benchmark_reject_reasons = swing_benchmark_reject_reasons(setup, reasoning, tech)
         if benchmark_reject_reasons:
             reason_text = "; ".join(benchmark_reject_reasons)
             print(

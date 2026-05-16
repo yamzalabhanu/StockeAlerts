@@ -8,6 +8,25 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🧩 Latest Options + Scan Reliability Updates
+
+Recent updates make option recommendations more resilient across Polygon/Massive-compatible providers and keep alerts cleaner when no truly orderable contract is available. The options parser now accepts common provider aliases for contract metadata (`symbol`, `contractSymbol`, `optionSymbol`, `contractType`, `strikePrice`, `expirationDate`) and quote fields (`bid_price`, `ask_price`, `bp`, `ap`, `midpoint`, `mark_price`) instead of requiring only one exact Polygon field shape.
+
+Contract selection still starts with the strict liquidity path, but if every high-volume/high-OI candidate is filtered out, the selector now falls back in two safer stages: first to a configured 5% OTM default inside the requested DTE window, then to the best same-side snapshot that has valid contract metadata and positive pricing. Stale timestamped snapshots are still rejected by the strict recommendation path, but the final best-available fallback can surface them with an explicit stale-pricing warning so traders know the price is only a fallback limit reference.
+
+Swing alerts also avoid showing `SKIP` results as if they were recommendations. When no orderable option contract exists, the swing trade can continue as an equity-style alert and logs the option status/reason for audit instead of sending a misleading recommended-contract block.
+
+Additional scan defaults were tuned for live usability:
+
+| Update | Current behavior |
+|---|---|
+| Core-first base scan | `BASE_WATCHLIST` now scans only the high-liquidity `CORE_WATCHLIST` every cycle; secondary, speculative, and broad master-universe symbols enter through active mover discovery. |
+| Market-hours quality windows | High-quality intraday windows now start at the regular open: `09:30-13:30` and `13:30-14:59` New York time. |
+| Daily trade cap default | `MAX_TRADES_PER_TRADING_DAY` defaults to `25` market-local trades/signals per day. |
+| Swing MTF tolerance | Benchmark swings may accept `MIXED_ALIGNMENT` when elite mixed-MTF safeguards are satisfied (`SWING_MIXED_MTF_ELITE_SCORE`, ADX, relative volume, and candle body checks). |
+
+---
+
 ### ⚡ Real-Time Alert Price Refresh + Stale Data Guardrails
 
 Intraday alerts now reduce quote/aggregate drift by using Polygon's latest entitled stock trade in two places: technical context can overlay a fresh last trade when it is not materially older than the newest minute aggregate, and the alert sender refreshes the displayed Telegram price again immediately before delivery. This makes the visible alert entry less likely to lag broker quotes because of scan latency, delayed aggregates, or same-minute aggregate closes.
@@ -29,7 +48,7 @@ Key controls include:
 
 ### 🧯 Daily Trade Cap + Fill-Aware Options Automation
 
-Ranked alert delivery and automated option buys now share a market-local daily trade cap so the bot can finish a full scan, rank the best intraday/swing candidates, and still stop once the configured day limit is reached. The default cap is `10` trades per New York trading day, and the option order state keeps a per-day buy counter so restarted scans do not accidentally over-trade.
+Ranked alert delivery and automated option buys now share a market-local daily trade cap so the bot can finish a full scan, rank the best intraday/swing candidates, and still stop once the configured day limit is reached. The default cap is `25` trades per New York trading day, and the option order state keeps a per-day buy counter so restarted scans do not accidentally over-trade.
 
 Paper options automation is also fill-aware. Buy submissions can be tracked as pending until Alpaca reports an actual fill, then the manager records the broker `filled_avg_price`, `filled_at` timestamp, and `buy_order_id`. Profit targets and stop losses are calculated from the actual filled premium instead of the submitted limit price, and Telegram updates call out when a pending buy starts being monitored from the resolved fill price.
 
@@ -39,7 +58,7 @@ Key controls include:
 
 | Setting | Purpose |
 |---|---|
-| `MAX_TRADES_PER_TRADING_DAY=10` | Market-local daily cap shared by ranked alert selection and option buy automation |
+| `MAX_TRADES_PER_TRADING_DAY=25` | Market-local daily cap shared by ranked alert selection and option buy automation |
 | `MIN_OPTION_PREMIUM=0.50` | Minimum option entry premium required by contract selection and fallback picks |
 | `MIN_OPTION_BUY_PREMIUM=0.50` | Minimum option limit price accepted by the Alpaca paper order manager |
 | `OPTION_PROFIT_TARGET_PCT=50` | Managed paper sell target measured from the actual filled premium |
@@ -258,7 +277,7 @@ Key controls include:
 | `MIN_AUTO_OPTION_VOLUME` | Minimum summed option volume for options-activity qualification |
 | `MIN_AUTO_OPTION_OPEN_INTEREST` | Minimum summed option open interest for options-activity qualification |
 
-The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers. The expanded `MASTER_WATCHLIST` also documents the broader ETF, sector, AI/semiconductor, crypto beta, biotech, travel, and high-momentum reference universe used when broadening discovery beyond the core tiers.
+The configured universe is separated into `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` so liquid options names stay prioritized while speculative symbols are still available when they become active movers. The static `BASE_WATCHLIST` now uses only `CORE_WATCHLIST` for each live cycle, while secondary/speculative symbols and the expanded `MASTER_WATCHLIST` are available through the dynamic mover gate. This keeps routine scans focused on high-liquidity options names and still lets ETF, sector, AI/semiconductor, crypto beta, biotech, travel, and high-momentum names join when stock, extended-hours, or options activity justifies them.
 
 ---
 
@@ -421,6 +440,8 @@ The options layer evaluates:
 - Estimated option dollar volume
 
 The selector now uses the same Polygon/Massive-compatible snapshot client as the options-flow engine. When a directional intraday or swing setup passes, the bot can attach an `Option Pick` that only considers contracts meeting the configured high-volume and high-open-interest floors, then prioritizes the strongest same-day volume, open interest, acceptable spreads, target delta, and nearby strikes instead of simply choosing the closest ATM contract.
+
+The parser accepts multiple provider field aliases for contract symbols, option type, strike, expiration, bid/ask, and midpoint/mark pricing. If strict filters leave no contract, the selector can return a 5% OTM default candidate or a best-available positive-priced same-side snapshot, with stale snapshots clearly marked as fallback pricing references rather than fresh recommendations.
 
 The true options flow and liquidity engine can also use Polygon/Massive-compatible options APIs to score explosive intraday and swing conditions:
 
@@ -606,7 +627,7 @@ Before a swing alert is sent, the benchmark layer validates:
 - GOOD/WARNING execution quality
 - PASS/WARNING/REJECT setup-quality status when other benchmark requirements still pass
 - `ELITE` or `GOOD` chart-structure quality
-- GOOD/STRONG multi-timeframe alignment
+- GOOD/STRONG multi-timeframe alignment, plus elite guarded MIXED_ALIGNMENT exceptions
 - No blocking AI reject reasons
 
 
@@ -993,7 +1014,8 @@ EXTENDED_HOURS_MIN_VOLUME=100000
 MAX_INTRADAY_ALERTS_PER_SCAN=5
 MAX_SWING_ALERTS_PER_SCAN=5
 MAX_HIGH_QUALITY_ALERTS_PER_SCAN=10
-MAX_TRADES_PER_TRADING_DAY=10
+MAX_TRADES_PER_TRADING_DAY=25
+# Built-in high-quality windows are 09:30-13:30 and 13:30-14:59 New York time
 
 # Optional options-flow providers and tuning
 OPTIONS_API_KEY=
@@ -1085,7 +1107,7 @@ Environment controls:
 - `ENABLE_AUTO_OPTION_TRADING=true` enables automated option buys from recommended contracts.
 - `OPTION_CONTRACT_QTY=1` sets the number of contracts per alert.
 - `MIN_OPTION_BUY_PREMIUM=0.50` skips low-premium option orders before submission.
-- `MAX_TRADES_PER_TRADING_DAY=10` stops additional paper buys after the daily market-local trade cap is reached.
+- `MAX_TRADES_PER_TRADING_DAY=25` stops additional paper buys after the daily market-local trade cap is reached.
 - `OPTION_PROFIT_TARGET_PCT=50` submits the managed sell at +50% option P/L from the actual filled premium.
 - `OPTION_STOP_LOSS_PCT=-50` submits the managed sell at -50% option P/L from the actual filled premium.
 - `OPTION_PRICE_CHECK_INTERVAL_SEC=300` checks submitted option order prices every five minutes by default.

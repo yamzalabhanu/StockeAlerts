@@ -111,6 +111,12 @@ _JSON_SCHEMA = {
             "risk": {"type": "string", "enum": ["low", "medium", "high", "unclear"]},
             "retest_confirmation": {"type": "string", "enum": ["confirmed", "partial", "missing", "failed", "unclear"]},
             "late_breakout_risk": {"type": "string", "enum": ["low", "medium", "high", "unclear"]},
+            "late_breakout_risk_score": {"type": "number", "minimum": 0, "maximum": 100},
+            "trap_probability": {"type": "number", "minimum": 0, "maximum": 100},
+            "institutional_activity": {"type": "string", "enum": ["accumulation", "distribution", "absorption", "failed_auction", "liquidity_grab", "none", "unclear"]},
+            "compression_quality": {"type": "string", "enum": ["strong", "healthy", "mixed", "weak", "none", "unclear"]},
+            "volume_character": {"type": "string", "enum": ["accumulation", "distribution", "absorption", "climactic", "dry_up", "normal", "unclear"]},
+            "structure_confidence": {"type": "number", "minimum": 0, "maximum": 100},
             "etf_alignment": {"type": "string", "enum": ["aligned", "mixed", "conflicting", "unavailable", "unclear"]},
             "volume_confirmation": {"type": "string", "enum": ["confirmed", "mixed", "weak", "climactic", "unavailable", "unclear"]},
             "risk_reward_viability": {"type": "string", "enum": ["viable", "marginal", "poor", "unclear"]},
@@ -190,6 +196,12 @@ _JSON_SCHEMA = {
             "risk",
             "retest_confirmation",
             "late_breakout_risk",
+            "late_breakout_risk_score",
+            "trap_probability",
+            "institutional_activity",
+            "compression_quality",
+            "volume_character",
+            "structure_confidence",
             "etf_alignment",
             "volume_confirmation",
             "risk_reward_viability",
@@ -344,6 +356,12 @@ def normalize_vision_reading(data: Dict[str, Any], symbol: str, timeframe: str) 
         "risk": risk,
         "retest_confirmation": retest_confirmation,
         "late_breakout_risk": late_breakout_risk,
+        "late_breakout_risk_score": max(0, min(safe_int(data.get("late_breakout_risk_score"), 75 if late_breakout_risk == "high" else 35), 100)),
+        "trap_probability": max(0, min(safe_int(data.get("trap_probability"), 50 if normalized_features["failed_breakout"] else 20), 100)),
+        "institutional_activity": _normalize_enum(data.get("institutional_activity"), {"accumulation", "distribution", "absorption", "failed_auction", "liquidity_grab", "none", "unclear"}, "unclear"),
+        "compression_quality": _normalize_enum(data.get("compression_quality"), {"strong", "healthy", "mixed", "weak", "none", "unclear"}, "unclear"),
+        "volume_character": _normalize_enum(data.get("volume_character"), {"accumulation", "distribution", "absorption", "climactic", "dry_up", "normal", "unclear"}, "unclear"),
+        "structure_confidence": max(0, min(safe_int(data.get("structure_confidence"), safe_int(data.get("confidence", 50), 50)), 100)),
         "etf_alignment": etf_alignment,
         "volume_confirmation": volume_confirmation,
         "risk_reward_viability": risk_reward_viability,
@@ -396,6 +414,12 @@ def score_vision_reading(reading: Dict[str, Any], direction: str | None = None) 
     if features.get("liquidity_grab"):
         score += 6
         tags.append("LIQUIDITY_GRAB")
+    if reading.get("institutional_activity") in {"accumulation", "absorption", "liquidity_grab"}:
+        score += 6
+        tags.append("INSTITUTIONAL_ACTIVITY")
+    elif reading.get("institutional_activity") in {"distribution", "failed_auction"}:
+        score -= 8
+        warnings.append(f"Institutional activity is {reading.get('institutional_activity')}")
     if features.get("trapped_traders"):
         score += 5
         tags.append("TRAPPED_TRADERS")
@@ -419,7 +443,8 @@ def score_vision_reading(reading: Dict[str, Any], direction: str | None = None) 
         score -= 12
         tags.append("EXHAUSTION")
         warnings.append("Vision detected exhaustion candles")
-    if features.get("late_breakout") or reading.get("late_breakout_risk") == "high":
+    late_risk_score = safe_float(reading.get("late_breakout_risk_score"), 0) or 0
+    if features.get("late_breakout") or reading.get("late_breakout_risk") == "high" or late_risk_score >= 70:
         score -= 22
         tags.append("LATE_CHASE")
         warnings.append("Breakout is extended; wait for a cleaner retest")
@@ -442,6 +467,12 @@ def score_vision_reading(reading: Dict[str, Any], direction: str | None = None) 
     elif reading.get("volume_confirmation") in {"weak", "climactic"}:
         score -= 8
         warnings.append(f"Volume confirmation is {reading.get('volume_confirmation')}")
+
+    trap_probability = safe_float(reading.get("trap_probability"), 0) or 0
+    if trap_probability >= 65:
+        score -= 16
+        tags.append("TRAP_RISK")
+        warnings.append(f"Vision trap probability is elevated: {trap_probability:.0f}/100")
 
     if reading.get("risk_reward_viability") == "viable":
         score += 8
@@ -536,6 +567,7 @@ def build_vision_prompt(symbol: str, timeframe: str, analysis: Dict[str, Any] | 
         "5) entry timing, 6) risk/reward, 7) indicators only as secondary evidence. "
         "Use the current screenshot stack plus any prior sequence screenshots as memory; check 1m/5m/15m alignment when provided. "
         "Explicitly determine trend_direction, market_phase, retest_confirmation, late_breakout_risk, "
+        "late_breakout_risk_score, trap_probability, institutional_activity, compression_quality, volume_character, structure_confidence, "
         "ETF alignment from SPY/QQQ/SMH/VIX context, volume_confirmation, and risk_reward_viability. "
         "Respect ORB high/low, premarket high/low, and previous-day high/low overlays or context as key decision levels. "
         "Avoid chasing extended moves: if the breakout is already extended more than 1.5 ATR without a clean retest, prefer WAIT. "

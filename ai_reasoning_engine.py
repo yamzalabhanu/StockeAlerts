@@ -20,6 +20,8 @@ from vision_ai import score_chart_structure
 from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key
 from sector_filter import sector_direction_adjustment
 from adaptive_scoring import behavior_penalty
+from probabilistic_quality import DEFAULT_PENALTIES, classify_score, probabilistic_penalty_profile
+from trade_attribution import setup_attribution_adjustment
 from config import (
     ALLOW_EXECUTION_WARNING,
     ALLOW_MTF_MIXED,
@@ -151,11 +153,11 @@ def build_reasoning_report(
         if high_quality_intraday and ALLOW_MTF_MIXED:
             warnings.append("Mixed multi-timeframe alignment allowed for high-quality intraday setup")
         else:
-            score -= 4
-            warnings.append("Mixed multi-timeframe alignment")
+            score += DEFAULT_PENALTIES["mtf_mixed"]
+            warnings.append("Mixed multi-timeframe alignment converted to small probability penalty")
 
     elif mtf_structure:
-        score -= 16
+        score += DEFAULT_PENALTIES["mtf_poor"]
         reject_reasons.append("Poor multi-timeframe alignment")
 
     ex_quality = execution.get("quality")
@@ -183,7 +185,7 @@ def build_reasoning_report(
             warnings.append("Execution BAD softened for high-quality confirmed intraday setup")
             warnings.extend((execution.get("warnings") or [])[:3])
         else:
-            score -= 18
+            score += DEFAULT_PENALTIES["execution_bad"]
             reject_reasons.append("Poor liquidity/execution quality")
             warnings.extend((execution.get("warnings") or [])[:3])
 
@@ -206,7 +208,7 @@ def build_reasoning_report(
             warnings.append("Early-session setup warning allowed before full retest/structure criteria forms")
             warnings.extend((setup_quality.get("warnings") or [])[:3])
         else:
-            score -= 18
+            score += DEFAULT_PENALTIES["setup_reject"]
             reject_reasons.append("Setup failed elite quality filters")
             warnings.extend((setup_quality.get("warnings") or [])[:3])
 
@@ -221,7 +223,7 @@ def build_reasoning_report(
         reasons.append("Chart structure is good")
 
     elif vision_quality == "POOR":
-        score -= 15
+        score += DEFAULT_PENALTIES["vision_poor"]
         reject_reasons.append("Poor chart structure / late chase risk")
         warnings.extend((vision.get("warnings") or [])[:3])
 
@@ -258,6 +260,12 @@ def build_reasoning_report(
     }
     learning_context["setup_key"] = setup_structure_key(learning_context)
 
+    attribution = setup_attribution_adjustment(learning_context["setup_key"])
+    if attribution.get("adjustment"):
+        score += attribution["adjustment"]
+        target = reasons if attribution["adjustment"] > 0 else warnings
+        target.append(f"Setup attribution adjusted score by {attribution['adjustment']:+d}: {attribution.get('reason')}")
+
     learning_score_adjustment = score_adjustment(learning_context)
     learning_priority_bonus = priority_bonus(learning_context)
     if learning_score_adjustment:
@@ -284,6 +292,15 @@ def build_reasoning_report(
     if setup_decay.get("decay"):
         score -= setup_decay["decay"]
         warnings.append("Setup decay penalty: " + ", ".join(setup_decay.get("reasons") or []))
+
+    probabilistic_profile = probabilistic_penalty_profile(
+        execution=execution,
+        setup_quality=setup_quality,
+        mtf=mtf,
+        vision=vision,
+    )
+    if probabilistic_profile.get("reasons"):
+        warnings.append("Probabilistic penalties: " + ", ".join(probabilistic_profile["reasons"][:5]))
 
     raw_final_score = max(0, min(100, round(score, 2)))
     ensemble_components = component_scores(
@@ -316,6 +333,7 @@ def build_reasoning_report(
 
     probabilities = probability_profile(final_score, no_trade, market_phase, vision)
     quality_rank = alert_quality_rank(final_score, probabilities, no_trade)
+    probabilistic_tier = classify_score(final_score)
     adaptive_min_score = dynamic_min_score(regime_name, market_phase.get("phase"), MIN_SCORE)
 
     if no_trade.get("is_no_trade") and final_score < 90:
@@ -351,6 +369,7 @@ def build_reasoning_report(
         probabilities=probabilities,
         quality_rank=quality_rank,
         adaptive_min_score=adaptive_min_score,
+        probabilistic_tier=probabilistic_tier,
         no_trade=no_trade,
     )
 
@@ -370,9 +389,12 @@ def build_reasoning_report(
         "no_trade": no_trade,
         "probabilities": probabilities,
         "quality_rank": quality_rank,
+        "probabilistic_tier": probabilistic_tier,
         "adaptive_min_score": adaptive_min_score,
         "sector_relative_strength": sector_adjustment,
         "adaptive_behavior_adjustment": adaptive_behavior_adjustment,
+        "setup_attribution": attribution,
+        "probabilistic_penalties": probabilistic_profile,
         "reasons": reasons,
         "warnings": warnings,
         "reject_reasons": reject_reasons,
@@ -405,6 +427,7 @@ def _build_narrative(
     probabilities=None,
     quality_rank=None,
     adaptive_min_score=None,
+    probabilistic_tier=None,
     no_trade=None,
 ):
 
@@ -426,7 +449,7 @@ def _build_narrative(
         f"Market phase: {market_phase.get('phase', 'UNKNOWN')} ({market_phase.get('confidence', 0)}% confidence); adaptive minimum score {adaptive_min_score or 'n/a'}.",
         f"MTF structure: {mtf.get('structure', 'UNKNOWN')} with {mtf.get('aligned_timeframes', 0)} aligned timeframes.",
         f"Execution quality: {execution.get('quality', 'UNKNOWN')} | Setup filter: {setup_quality.get('status', 'UNKNOWN')} | Chart structure: {vision.get('quality', 'UNKNOWN')}.",
-        f"Weighted ensemble: {ensemble_score if ensemble_score is not None else 'n/a'} with components {component_scores}; rank {quality_rank or 'n/a'}.",
+        f"Weighted ensemble: {ensemble_score if ensemble_score is not None else 'n/a'} with components {component_scores}; rank {quality_rank or 'n/a'}; probabilistic tier {probabilistic_tier or 'n/a'}.",
         f"Probabilities: win {probabilities.get('win_probability', 0):.2f}, continuation {probabilities.get('trend_continuation_probability', 0):.2f}, reversal {probabilities.get('reversal_probability', 0):.2f}, trap {probabilities.get('trap_probability', 0):.2f}.",
     ]
 

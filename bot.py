@@ -20,6 +20,8 @@ from intraday_confirm import intraday_confirmation
 from ai_scoring import ai_score_setup
 from ai_reasoning_engine import build_reasoning_report
 from performance_learning import calibrate_confidence, priority_bonus, setup_structure_key
+from market_phase import detect_market_phase
+from ensemble_confidence import dynamic_min_score, setup_decay_score
 from daily_report_engine import send_daily_learning_report
 from options_engine import analyze_options_flow, format_options_flow, option_to_dict, options_flow_to_dict, select_option_contract
 from option_order_manager import (
@@ -55,7 +57,7 @@ def log_alert(row: Dict[str, Any]):
         "premarket_high", "premarket_low", "prev_high", "prev_low",
         "current_volume", "avg_20_volume",
         "intraday_confirmations", "intraday_required", "intraday_reason",
-        "market_bias", "market_details", "market_regime", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons", "options_flow_bias", "options_flow_score", "options_flow_gamma_squeeze",
+        "market_bias", "market_details", "market_regime", "market_phase", "ensemble_score", "quality_rank", "win_probability", "trap_probability", "no_trade_score", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons", "options_flow_bias", "options_flow_score", "options_flow_gamma_squeeze",
     ]
 
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
@@ -365,16 +367,26 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"PUT_AI={put['score']} (rule={put.get('rule_score')}), best={best['direction']}"
         )
 
-        if best["score"] < min_score:
-            print(f"{ticker}: skipped, AI score {best['score']} below {min_score}")
+        market_snapshot = self.get_market_bias()
+        phase_snapshot = detect_market_phase(tech, best, market_snapshot)
+        best["market_phase"] = phase_snapshot
+        adaptive_prefilter = dynamic_min_score((market_snapshot or {}).get("regime"), phase_snapshot.get("phase"), min_score)
+        decay_snapshot = setup_decay_score(best, tech)
+        if decay_snapshot.get("decay"):
+            best["score"] = max(0, best["score"] - decay_snapshot["decay"] * 0.35)
+            best.setdefault("reasons", []).append(
+                "setup decay softened score: " + ", ".join(decay_snapshot.get("reasons") or [])
+            )
+        if best["score"] < adaptive_prefilter:
+            print(f"{ticker}: skipped, ensemble score {best['score']} below adaptive floor {adaptive_prefilter} for phase {phase_snapshot.get('phase')}")
             return None
 
         if self.cooldown_active(ticker, best["direction"]):
             return None
 
         if best.get("late_breakout_risk") and best["score"] < 90:
-            print(f"{ticker}: skipped, late breakout risk - {best.get('late_reason')}")
-            return None
+            best["score"] = max(0, best["score"] - 12)
+            best.setdefault("reasons", []).append(f"late breakout risk penalty: {best.get('late_reason')}")
 
         intraday_ok, intraday_info = intraday_confirmation(ticker, best)
         print(f"{ticker}: intraday={intraday_info.get('confirmations')}/{intraday_info.get('required_confirmations')} | approved={intraday_info.get('approved')} | reason={intraday_info.get('reason')}")
@@ -547,6 +559,10 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         setup_key = learning_context.get("setup_key") or setup_structure_key({"alert_type": "INTRADAY", "entry_mode": entry_mode, "direction": direction})
         options_flow = options_flow or setup.get("options_flow")
         option_contract = setup.get("option_contract")
+        probabilities = reasoning.get("probabilities") or {}
+        quality_rank = reasoning.get("quality_rank") or "n/a"
+        no_trade_score = (reasoning.get("no_trade") or {}).get("score", 0)
+        market_phase = (reasoning.get("market_phase") or {}).get("phase", "UNKNOWN")
         options_flow_text = ""
         if options_flow:
             if isinstance(options_flow, dict):
@@ -604,7 +620,9 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"(delay {tech.get('intraday_data_delay_sec', 'n/a')}s, "
             f"RT overlay {tech.get('realtime_overlay_active')})\n"
             f"⭐ *AI Score:* {setup['score']}/100 | *Rule:* {setup.get('rule_score')}\n"
-            f"🏅 *Rank Score:* {ranking_score:.1f}\n"
+            f"🏅 *Rank Score:* {ranking_score:.1f} | *Tier:* {quality_rank}\n"
+            f"🧭 *Phase:* {market_phase} | *No-Trade:* {no_trade_score}/100\n"
+            f"📈 *Prob:* Win {float(probabilities.get('win_probability', 0)) * 100:.0f}% | Trap {float(probabilities.get('trap_probability', 0)) * 100:.0f}%\n"
             f"🎯 *Mode:* {entry_mode} — {mode_reason}\n"
             f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%) | Hist Adj {ai.get('confidence_adjustment', 0):+.1f}\n"
             f"🏆 *Quality:* {ai['setup_quality']} | *Timing:* {ai['entry_timing']}\n"
@@ -697,6 +715,12 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "market_bias": market["bias"],
             "market_details": ", ".join(market["details"]),
             "market_regime": (reasoning.get("regime") or {}).get("regime"),
+            "market_phase": (reasoning.get("market_phase") or {}).get("phase"),
+            "ensemble_score": reasoning.get("ensemble_score"),
+            "quality_rank": reasoning.get("quality_rank"),
+            "win_probability": (reasoning.get("probabilities") or {}).get("win_probability"),
+            "trap_probability": (reasoning.get("probabilities") or {}).get("trap_probability"),
+            "no_trade_score": (reasoning.get("no_trade") or {}).get("score"),
             "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
             "chart_structure": (reasoning.get("vision") or {}).get("quality"),
             "setup_key": setup_key,
@@ -723,6 +747,12 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                 setup_context={
                     "setup_key": setup_key,
                     "market_regime": (reasoning.get("regime") or {}).get("regime"),
+                    "market_phase": (reasoning.get("market_phase") or {}).get("phase"),
+                    "ensemble_score": reasoning.get("ensemble_score"),
+                    "quality_rank": reasoning.get("quality_rank"),
+                    "win_probability": (reasoning.get("probabilities") or {}).get("win_probability"),
+                    "trap_probability": (reasoning.get("probabilities") or {}).get("trap_probability"),
+                    "no_trade_score": (reasoning.get("no_trade") or {}).get("score"),
                     "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
                     "chart_structure": (reasoning.get("vision") or {}).get("quality"),
                     "ai_confidence": ai.get("base_confidence"),

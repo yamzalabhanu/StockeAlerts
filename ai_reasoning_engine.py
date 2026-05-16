@@ -4,10 +4,22 @@ from typing import Dict, Any
 
 from execution_quality import evaluate_execution_quality
 from market_regime import detect_market_regime
+from market_phase import detect_market_phase, phase_score_adjustment
+from ensemble_confidence import (
+    alert_quality_rank,
+    component_scores,
+    dynamic_min_score,
+    no_trade_score,
+    probability_profile,
+    setup_decay_score,
+    weighted_ensemble_score,
+)
 from multi_timeframe_engine import analyze_multi_timeframe_structure
 from setup_filters import evaluate_setup_quality
 from vision_ai import score_chart_structure
 from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key
+from sector_filter import sector_direction_adjustment
+from adaptive_scoring import behavior_penalty
 from config import (
     ALLOW_EXECUTION_WARNING,
     ALLOW_MTF_MIXED,
@@ -92,6 +104,13 @@ def build_reasoning_report(
     reasons = []
     warnings = []
     reject_reasons = []
+
+    market_phase = detect_market_phase(tech, setup, context.get("market"))
+    phase_adjustment = phase_score_adjustment(market_phase.get("phase"), setup.get("entry_mode"))
+    if phase_adjustment:
+        score += phase_adjustment
+        target = reasons if phase_adjustment > 0 else warnings
+        target.append(f"Market phase {market_phase.get('phase')} adjusted score by {phase_adjustment:+d}")
 
     regime_name = regime.get("regime", "UNKNOWN")
 
@@ -206,6 +225,16 @@ def build_reasoning_report(
         reject_reasons.append("Poor chart structure / late chase risk")
         warnings.extend((vision.get("warnings") or [])[:3])
 
+    sector_context = tech.get("sector_relative_strength")
+    if isinstance(sector_context, dict):
+        sector_adjustment = sector_direction_adjustment(ticker, direction, sector_context)
+        if sector_adjustment.get("adjustment"):
+            score += sector_adjustment["adjustment"]
+            target = reasons if sector_adjustment["adjustment"] > 0 else warnings
+            target.append(f"Sector relative strength adjusted score by {sector_adjustment['adjustment']:+d}: {sector_adjustment.get('reason')}")
+    else:
+        sector_adjustment = {}
+
     rr = _safe_float(
         setup.get("risk_reward"),
         _safe_float(tech.get("risk_reward"), 0),
@@ -240,9 +269,56 @@ def build_reasoning_report(
     confidence_seed = setup.get("confidence", setup.get("ml_probability", base_score))
     learning_confidence = calibrate_confidence(confidence_seed, learning_context)
 
-    final_score = max(0, min(100, round(score, 2)))
+    adaptive_behavior_adjustment = behavior_penalty({
+        "late_breakout_risk": setup.get("late_breakout_risk"),
+        "atr_extension": tech.get("atr_extension") or tech.get("breakout_distance_atr"),
+        "market_phase": market_phase.get("phase"),
+        "risk_reward": setup.get("risk_reward") or tech.get("risk_reward"),
+    })
+    if adaptive_behavior_adjustment:
+        score += adaptive_behavior_adjustment
+        target = reasons if adaptive_behavior_adjustment > 0 else warnings
+        target.append(f"Adaptive ML behavior adjusted score by {adaptive_behavior_adjustment:+d}")
 
-    if reject_reasons and final_score < 85:
+    setup_decay = setup_decay_score(setup, tech)
+    if setup_decay.get("decay"):
+        score -= setup_decay["decay"]
+        warnings.append("Setup decay penalty: " + ", ".join(setup_decay.get("reasons") or []))
+
+    raw_final_score = max(0, min(100, round(score, 2)))
+    ensemble_components = component_scores(
+        base_score=base_score,
+        regime=regime,
+        market_phase=market_phase,
+        mtf=mtf,
+        execution=execution,
+        setup_quality=setup_quality,
+        vision=vision,
+        learning_confidence=learning_confidence,
+    )
+    ensemble_score = weighted_ensemble_score(ensemble_components)
+    # Preserve proven high-confluence rule strength while exposing the weighted
+    # ensemble as the calibration backbone. Hard reject reasons become score
+    # penalties/no-trade risk rather than automatic rejection.
+    final_score = max(raw_final_score, ensemble_score)
+    no_trade = no_trade_score({
+        "market_phase": market_phase,
+        "execution": execution,
+        "setup_quality": setup_quality,
+        "vision": vision,
+        "risk_reward": rr,
+        "setup_decay": setup_decay,
+    })
+    if no_trade.get("score"):
+        final_score = max(0, round(final_score - min(20, no_trade["score"] * 0.2), 2))
+        if no_trade.get("reasons"):
+            warnings.append("No-trade risk: " + ", ".join(no_trade["reasons"][:4]))
+
+    probabilities = probability_profile(final_score, no_trade, market_phase, vision)
+    quality_rank = alert_quality_rank(final_score, probabilities, no_trade)
+    adaptive_min_score = dynamic_min_score(regime_name, market_phase.get("phase"), MIN_SCORE)
+
+    if no_trade.get("is_no_trade") and final_score < 90:
         decision = "REJECT"
     elif final_score >= 90:
         decision = "A+"
@@ -269,6 +345,13 @@ def build_reasoning_report(
         reject_reasons,
         learning_confidence,
         learning_priority_bonus,
+        market_phase=market_phase,
+        ensemble_score=ensemble_score,
+        component_scores=ensemble_components,
+        probabilities=probabilities,
+        quality_rank=quality_rank,
+        adaptive_min_score=adaptive_min_score,
+        no_trade=no_trade,
     )
 
     return {
@@ -276,10 +359,20 @@ def build_reasoning_report(
         "final_score": final_score,
         "base_score": base_score,
         "regime": regime or {},
+        "market_phase": market_phase or {},
         "mtf": mtf or {},
         "execution": execution or {},
         "setup_quality": setup_quality or {},
         "vision": vision or {},
+        "ensemble_score": ensemble_score,
+        "component_scores": ensemble_components,
+        "setup_decay": setup_decay,
+        "no_trade": no_trade,
+        "probabilities": probabilities,
+        "quality_rank": quality_rank,
+        "adaptive_min_score": adaptive_min_score,
+        "sector_relative_strength": sector_adjustment,
+        "adaptive_behavior_adjustment": adaptive_behavior_adjustment,
         "reasons": reasons,
         "warnings": warnings,
         "reject_reasons": reject_reasons,
@@ -306,6 +399,13 @@ def _build_narrative(
     reject_reasons,
     learning_confidence=None,
     learning_priority_bonus=0,
+    market_phase=None,
+    ensemble_score=None,
+    component_scores=None,
+    probabilities=None,
+    quality_rank=None,
+    adaptive_min_score=None,
+    no_trade=None,
 ):
 
     regime = regime or {}
@@ -315,12 +415,19 @@ def _build_narrative(
     vision = vision or {}
     learning_confidence = learning_confidence or {}
     learning_stats = learning_confidence.get("learning_stats") or {}
+    market_phase = market_phase or {}
+    component_scores = component_scores or {}
+    probabilities = probabilities or {}
+    no_trade = no_trade or {}
 
     lines = [
         f"AI Reasoning: {trade_type} {direction} {ticker} classified as {decision} with composite score {final_score}/100.",
         f"Market regime: {regime.get('regime', 'UNKNOWN')} ({regime.get('confidence', 0)}% confidence).",
+        f"Market phase: {market_phase.get('phase', 'UNKNOWN')} ({market_phase.get('confidence', 0)}% confidence); adaptive minimum score {adaptive_min_score or 'n/a'}.",
         f"MTF structure: {mtf.get('structure', 'UNKNOWN')} with {mtf.get('aligned_timeframes', 0)} aligned timeframes.",
         f"Execution quality: {execution.get('quality', 'UNKNOWN')} | Setup filter: {setup_quality.get('status', 'UNKNOWN')} | Chart structure: {vision.get('quality', 'UNKNOWN')}.",
+        f"Weighted ensemble: {ensemble_score if ensemble_score is not None else 'n/a'} with components {component_scores}; rank {quality_rank or 'n/a'}.",
+        f"Probabilities: win {probabilities.get('win_probability', 0):.2f}, continuation {probabilities.get('trend_continuation_probability', 0):.2f}, reversal {probabilities.get('reversal_probability', 0):.2f}, trap {probabilities.get('trap_probability', 0):.2f}.",
     ]
 
     if learning_stats:
@@ -338,8 +445,11 @@ def _build_narrative(
     if warnings:
         lines.append("Warnings: " + "; ".join(warnings[:5]) + ".")
 
+    if no_trade.get("score"):
+        lines.append(f"No-trade score: {no_trade.get('score')}/100 from {'; '.join(no_trade.get('reasons') or [])}.")
+
     if reject_reasons:
-        lines.append("Reject risks: " + "; ".join(reject_reasons[:4]) + ".")
+        lines.append("Reject risks converted to penalties: " + "; ".join(reject_reasons[:4]) + ".")
 
     return "\n".join(lines)
 

@@ -16,6 +16,15 @@ LIQUIDITY_TRAP = "LIQUIDITY_TRAP"
 FAKE_BREAKOUT = "FAKE_BREAKOUT"
 EXHAUSTION = "EXHAUSTION"
 
+# Normalized phase labels used by the scoring router.  The legacy phase names
+# remain unchanged for existing tests/alerts, while these labels make the
+# higher-level routing explicit.
+TRENDING_UP = "TRENDING_UP"
+TRENDING_DOWN = "TRENDING_DOWN"
+CHOP = "CHOP"
+REVERSAL = "REVERSAL"
+
+
 PHASES = {
     OPEN_DRIVE,
     TREND_DAY,
@@ -68,6 +77,7 @@ def detect_market_phase(tech: Dict[str, Any] | None, setup: Dict[str, Any] | Non
     consolidation = safe_float(tech.get("consolidation_tightness"), 1) or 1
     trend_5m = str(tech.get("trend_5m") or "").upper()
     trend_15m = str(tech.get("trend_15m") or "").upper()
+    trend_bias = str(market.get("bias") or market.get("market_bias") or tech.get("market_bias") or "").upper()
 
     if setup.get("liquidity_sweep") or tech.get("liquidity_sweep"):
         if setup.get("retest_confirmed") or tech.get("reclaim_confirmed"):
@@ -110,8 +120,13 @@ def detect_market_phase(tech: Dict[str, Any] | None, setup: Dict[str, Any] | Non
     if phase in {RANGE, REVERSAL_ATTEMPT}:
         confidence -= 5
 
+    normalized_phase = _normalized_phase(phase, direction, trend_5m, trend_15m, trend_bias)
+    routing = phase_routing(normalized_phase, entry_mode)
+
     return {
         "phase": phase,
+        "normalized_phase": normalized_phase,
+        "routing": routing,
         "confidence": max(0, min(100, confidence)),
         "reasons": reasons,
         "warnings": warnings,
@@ -134,3 +149,50 @@ def phase_score_adjustment(phase: str, entry_mode: str | None = None) -> int:
     if phase == REVERSAL_ATTEMPT:
         return -10
     return 0
+
+
+def _normalized_phase(phase: str, direction: str = "", trend_5m: str = "", trend_15m: str = "", trend_bias: str = "") -> str:
+    if phase in {OPEN_DRIVE, TREND_DAY, BREAKOUT_BUILDING, PULLBACK}:
+        combined = " ".join([direction, trend_5m, trend_15m, trend_bias])
+        if any(token in combined for token in ["BEAR", "DOWN", "PUT"]):
+            return TRENDING_DOWN
+        return TRENDING_UP
+    if phase in {RANGE}:
+        return CHOP
+    if phase in {REVERSAL_ATTEMPT, SHORT_COVERING}:
+        return REVERSAL
+    if phase in {FAKE_BREAKOUT, EXHAUSTION}:
+        return FAKE_BREAKOUT if phase == FAKE_BREAKOUT else EXHAUSTION
+    return phase
+
+
+def phase_routing(normalized_phase: str, entry_mode: str | None = None) -> Dict[str, Any]:
+    entry_mode = str(entry_mode or "").upper()
+    if normalized_phase in {TRENDING_UP, TRENDING_DOWN}:
+        preferred = ["BREAKOUT", "MOMENTUM", "RETEST", "PULLBACK", "ORB_RETEST"]
+        threshold_adjustment = -6
+        requirements = ["avoid extended candles", "prefer retest or EMA/VWAP hold"]
+    elif normalized_phase == CHOP:
+        preferred = ["VWAP_RECLAIM", "FADE", "LIQUIDITY_TRAP", "RETEST"]
+        threshold_adjustment = 8
+        requirements = ["demand reclaim confirmation", "avoid raw breakout chase"]
+    elif normalized_phase == REVERSAL:
+        preferred = ["VWAP_RECLAIM", "REVERSAL", "LIQUIDITY_TRAP"]
+        threshold_adjustment = 4
+        requirements = ["require volume expansion", "require reclaim/rejection confirmation"]
+    elif normalized_phase in {FAKE_BREAKOUT, EXHAUSTION}:
+        preferred = ["WAIT", "FADE_AFTER_CONFIRMATION"]
+        threshold_adjustment = 12
+        requirements = ["wait for reset/retest", "avoid first signal after trap"]
+    else:
+        preferred = ["RETEST", "PULLBACK"]
+        threshold_adjustment = 0
+        requirements = ["wait for clearer phase confirmation"]
+
+    return {
+        "preferred_setups": preferred,
+        "avoid": ["BREAKOUT_CHASE"] if normalized_phase in {CHOP, FAKE_BREAKOUT, EXHAUSTION} else [],
+        "requirements": requirements,
+        "entry_mode_aligned": entry_mode in preferred if entry_mode else None,
+        "threshold_adjustment": threshold_adjustment,
+    }

@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable
+
 from bot_utils import safe_float
 from chart_ai import score_vision_reading
 
@@ -8,6 +12,72 @@ WEAK_STRUCTURE = 'WEAK_STRUCTURE'
 ACCUMULATION = 'ACCUMULATION'
 DISTRIBUTION = 'DISTRIBUTION'
 COMPRESSION = 'COMPRESSION'
+
+
+def _snapshot_value(snapshot: Dict[str, Any], *names: str) -> float | None:
+    for name in names:
+        value = safe_float(snapshot.get(name))
+        if value is not None:
+            return value
+    return None
+
+
+def score_vision_sequence(sequence: Iterable[Dict[str, Any]] | None, direction: str) -> dict:
+    """Score chart-memory from multiple Vision/candle snapshots.
+
+    Expected snapshots can be raw technical dictionaries or Vision readings from
+    consecutive times (for example 09:35, 09:45, 09:55).  The scorer rewards
+    acceleration with orderly retests and penalizes failed breakouts/exhaustion.
+    """
+    snapshots = [s for s in (sequence or []) if isinstance(s, dict)]
+    if len(snapshots) < 2:
+        return {"score": 0, "tags": [], "warnings": [], "samples": len(snapshots)}
+
+    first = snapshots[0]
+    last = snapshots[-1]
+    direction = str(direction or "CALL").upper()
+    score = 0
+    tags: list[str] = []
+    warnings: list[str] = []
+
+    first_momentum = _snapshot_value(first, "momentum_score", "score", "candle_body_pct") or 0
+    last_momentum = _snapshot_value(last, "momentum_score", "score", "candle_body_pct") or 0
+    if last_momentum - first_momentum >= 12:
+        score += 10
+        tags.append("MOMENTUM_ACCELERATION")
+    elif first_momentum - last_momentum >= 15:
+        score -= 10
+        warnings.append("Momentum decelerating across chart sequence")
+
+    reclaim_seen = any(s.get("reclaim_confirmed") or s.get("retest_confirmed") for s in snapshots)
+    failed_seen = any(s.get("failed_breakout") or s.get("breakout_failed") for s in snapshots)
+    exhaustion_seen = any((safe_float(s.get("wick_ratio"), 0) or 0) >= 2 or (safe_float(s.get("breakout_distance_atr"), 0) or 0) >= 1.8 for s in snapshots)
+
+    if reclaim_seen and not failed_seen:
+        score += 12
+        tags.append("SEQUENCE_RETEST_CONFIRMED")
+    if failed_seen and not reclaim_seen:
+        score -= 16
+        warnings.append("Sequence shows failed breakout without reclaim")
+        tags.append("SEQUENCE_FAILED_BREAKOUT")
+    if exhaustion_seen:
+        score -= 10
+        warnings.append("Sequence shows exhaustion/extension risk")
+        tags.append("SEQUENCE_EXHAUSTION")
+
+    closes = [_snapshot_value(s, "close", "price", "last_price") for s in snapshots]
+    closes = [c for c in closes if c is not None]
+    if len(closes) >= 3:
+        rising = all(a <= b for a, b in zip(closes, closes[1:]))
+        falling = all(a >= b for a, b in zip(closes, closes[1:]))
+        if (direction == "CALL" and rising) or (direction == "PUT" and falling):
+            score += 8
+            tags.append("SEQUENCE_TREND_CONFIRMATION")
+        elif (direction == "CALL" and falling) or (direction == "PUT" and rising):
+            score -= 8
+            warnings.append("Sequence trend conflicts with alert direction")
+
+    return {"score": score, "tags": tags, "warnings": warnings, "samples": len(snapshots)}
 
 
 def score_chart_structure(tech: dict, direction: str) -> dict:
@@ -22,6 +92,10 @@ def score_chart_structure(tech: dict, direction: str) -> dict:
     score = 0
     structure_tags = []
     warnings = []
+    sequence_score = score_vision_sequence(tech.get('vision_sequence') or tech.get('chart_sequence'), direction)
+    score += safe_float(sequence_score.get('score'), 0) or 0
+    structure_tags.extend(sequence_score.get('tags') or [])
+    warnings.extend(sequence_score.get('warnings') or [])
 
     visual_score = None
     visual_reading = tech.get('vision_chart') or tech.get('visual_chart')
@@ -91,6 +165,7 @@ def score_chart_structure(tech: dict, direction: str) -> dict:
         'tags': structure_tags,
         'warnings': warnings,
         'visual': visual_score or {},
+        'sequence': sequence_score,
     }
 
 

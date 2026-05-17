@@ -56,6 +56,124 @@ def _skip_unauthorized_outcomes():
     return globals().get("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", True)
 
 
+
+def _nested_get(mapping, *keys):
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+        if current in (None, ""):
+            return None
+    return current
+
+
+def _first_context_value(context, *paths):
+    for path in paths:
+        if isinstance(path, str):
+            value = context.get(path) if isinstance(context, dict) else None
+        else:
+            value = _nested_get(context, *path)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _time_of_day_bucket(alert_time):
+    try:
+        local_time = alert_time.astimezone(MARKET_TZ).time()
+    except Exception:
+        local_time = alert_time.time()
+
+    if local_time < dt.time(9, 30):
+        return "PREMARKET"
+    if local_time < dt.time(10, 0):
+        return "OPENING_30"
+    if local_time < dt.time(11, 30):
+        return "MORNING"
+    if local_time < dt.time(13, 30):
+        return "MIDDAY"
+    if local_time < dt.time(15, 0):
+        return "AFTERNOON"
+    if local_time < dt.time(16, 0):
+        return "POWER_HOUR"
+    return "AFTER_HOURS"
+
+
+def _enriched_context_fields(setup_context, alert_time):
+    context = setup_context or {}
+    return {
+        "market_phase": _first_context_value(
+            context, "market_phase", ("reasoning", "market_phase", "phase")
+        ),
+        "time_of_day_bucket": _time_of_day_bucket(alert_time),
+        "atr_extension": _first_context_value(
+            context,
+            "atr_extension",
+            "breakout_distance_atr",
+            ("tech", "atr_extension"),
+            ("tech", "breakout_distance_atr"),
+            ("setup", "atr_extension"),
+            ("setup", "breakout_distance_atr"),
+        ),
+        "wick_ratio": _first_context_value(
+            context, "wick_ratio", ("tech", "wick_ratio"), ("setup", "wick_ratio")
+        ),
+        "candle_body_pct": _first_context_value(
+            context,
+            "candle_body_pct",
+            "body_pct",
+            ("tech", "candle_body_pct"),
+            ("tech", "body_pct"),
+            ("setup", "candle_body_pct"),
+            ("setup", "body_pct"),
+        ),
+        "distance_from_vwap": _first_context_value(
+            context,
+            "distance_from_vwap",
+            ("tech", "distance_from_vwap"),
+            ("setup", "distance_from_vwap"),
+        ),
+        "distance_from_ema21": _first_context_value(
+            context,
+            "distance_from_ema21",
+            "price_vs_ema21_pct",
+            ("tech", "distance_from_ema21"),
+            ("tech", "price_vs_ema21_pct"),
+            ("setup", "distance_from_ema21"),
+        ),
+        "rel_volume": _first_context_value(
+            context,
+            "rel_volume",
+            "relative_volume",
+            ("tech", "rel_volume"),
+            ("tech", "relative_volume"),
+            ("setup", "rel_volume"),
+        ),
+        "spread_pct": _first_context_value(
+            context, "spread_pct", ("option_contract", "spread_pct"), ("tech", "spread_pct")
+        ),
+        "option_volume": _first_context_value(
+            context, "option_volume", ("option_contract", "volume"), ("option_contract", "option_volume")
+        ),
+        "open_interest": _first_context_value(
+            context, "open_interest", ("option_contract", "open_interest")
+        ),
+        "sector_relative_strength": _first_context_value(
+            context,
+            "sector_relative_strength",
+            ("tech", "sector_relative_strength"),
+            ("setup", "sector_relative_strength"),
+        ),
+        "deep_ai_approval": _first_context_value(
+            context, "deep_ai_approval", ("ai", "verdict"), ("ai", "decision")
+        ),
+        "deep_ai_rejection_reason": _first_context_value(
+            context, "deep_ai_rejection_reason", ("ai", "reason"), ("reasoning", "reject_reasons")
+        ),
+    }
+
+
 def track_outcome(
     ticker,
     direction,
@@ -186,6 +304,7 @@ def track_outcome(
         "max_gain_pct": round(max_gain, 2),
         "max_loss_pct": round(max_loss, 2),
     }
+    row.update(_enriched_context_fields(setup_context, alert_time))
     row["forecast_accuracy_pct"] = _forecast_accuracy(row["expected_move_pct"], row["max_gain_pct"])
 
     append_outcome_row(OUTCOME_FILE, row)

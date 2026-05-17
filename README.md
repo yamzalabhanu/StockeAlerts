@@ -176,6 +176,13 @@ Post-alert outcome tracking now detects Polygon authorization/entitlement failur
 
 ---
 
+
+### 🧾 Enriched Outcome Memory
+
+`alert_outcomes.csv` now stores a wider decision-time snapshot for each tracked alert so historical learning can separate clean setups from late chases, weak candles, wide-spread contracts, and regime-specific failures. New outcome-memory columns include market phase, session time bucket, ATR extension, wick/body structure, VWAP/EMA21 distance, relative volume, option spread/volume/open interest, sector relative strength, and the final AI approval/rejection note.
+
+---
+
 ### 🧠 GPT-5 Mini Reasoning Defaults
 
 AI-backed market analysis, alert gates, trade-management decisions, and chart-vision reads now default to `gpt-5-mini`. Reasoning-capable models are configured through a shared OpenAI options helper that passes `reasoning_effort` instead of forcing low-temperature chat behavior, while non-reasoning model overrides can still use temperature settings.
@@ -185,7 +192,7 @@ Key controls include:
 | Setting | Purpose |
 |---|---|
 | `OPENAI_REASONING_MODEL` | Market-data reasoning model for AI alert decisions, defaults to `gpt-5-mini` |
-| `OPENAI_REASONING_EFFORT` | Reasoning depth for GPT-5/o-series models, defaults to `medium` |
+| `OPENAI_REASONING_EFFORT` | Reasoning depth for GPT-5/o-series models, defaults to `high` |
 | `OPENAI_VISION_MODEL` | Chart-vision model override, defaults to the reasoning model |
 
 ---
@@ -953,7 +960,7 @@ streamlit run streamlit_dashboard.py
 
 ## 🧠 OpenAI Market Reasoning Model
 
-StockeAlerts defaults its AI alert gates to `gpt-5-mini` with `medium` reasoning effort so the model can think through trend, volume, regime, risk/reward, entry timing, and options context before approving alerts. Override `OPENAI_REASONING_MODEL` if you need a cheaper or lower-latency model, and adjust `OPENAI_REASONING_EFFORT` (`low`, `medium`, `high`, etc.) to trade speed/cost for deeper reasoning.
+StockeAlerts defaults its AI alert gates to `gpt-5-mini` with `high` reasoning effort so the model can think through trend, volume, regime, risk/reward, entry timing, and options context before approving alerts. Override `OPENAI_REASONING_MODEL` if you need a cheaper or lower-latency model, and adjust `OPENAI_REASONING_EFFORT` (`low`, `medium`, `high`, etc.) to trade speed/cost for deeper reasoning.
 
 ---
 
@@ -974,7 +981,7 @@ OPENAI_SCAN_MODEL=gpt-5-mini
 OPENAI_HIGH_QUALITY_MODEL=gpt-5.2
 OPENAI_HIGH_QUALITY_MIN_SCORE=95
 OPENAI_REASONING_MODEL=gpt-5-mini
-OPENAI_REASONING_EFFORT=medium
+OPENAI_REASONING_EFFORT=high
 OPENAI_VISION_MODEL=gpt-5-mini
 POLYGON_API_KEY=
 ENABLE_OUTCOME_TRACKING=true       # Set false to skip post-alert Polygon minute-aggregate outcome checks

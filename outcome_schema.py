@@ -2,7 +2,7 @@ import csv
 import os
 from typing import Any, Dict, List
 
-OUTCOME_FIELDS = [
+LEGACY_OUTCOME_FIELDS = [
     "timestamp",
     "ticker",
     "direction",
@@ -29,6 +29,25 @@ OUTCOME_FIELDS = [
     "forecast_accuracy_pct",
 ]
 
+OUTCOME_ENRICHMENT_FIELDS = [
+    "market_phase",
+    "time_of_day_bucket",
+    "atr_extension",
+    "wick_ratio",
+    "candle_body_pct",
+    "distance_from_vwap",
+    "distance_from_ema21",
+    "rel_volume",
+    "spread_pct",
+    "option_volume",
+    "open_interest",
+    "sector_relative_strength",
+    "deep_ai_approval",
+    "deep_ai_rejection_reason",
+]
+
+OUTCOME_FIELDS = LEGACY_OUTCOME_FIELDS + OUTCOME_ENRICHMENT_FIELDS
+
 
 def _blank_outcome() -> Dict[str, Any]:
     return {field: "" for field in OUTCOME_FIELDS}
@@ -54,6 +73,11 @@ def _row_from_values(header: List[str], values: List[str]) -> Dict[str, Any]:
     """
     if len(values) == len(OUTCOME_FIELDS):
         return dict(zip(OUTCOME_FIELDS, values))
+
+    if len(values) == len(LEGACY_OUTCOME_FIELDS):
+        row = _blank_outcome()
+        row.update(dict(zip(LEGACY_OUTCOME_FIELDS, values)))
+        return row
 
     row = _blank_outcome()
     for idx, value in enumerate(values):

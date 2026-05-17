@@ -8,6 +8,21 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+### 🎯 Adaptive Precision Ensemble + Probabilistic Quality Gates
+
+The latest alert-quality path now combines technical score, chart vision, market regime, multi-timeframe/setup structure, execution quality, and learned confidence into one weighted ensemble confidence profile. Instead of rejecting every imperfect setup immediately, former hard stops such as execution warnings, setup-filter warnings/rejections, mixed MTF alignment, or weak vision can become explicit probability penalties. The final report exposes component scores, setup-decay/chase risk, no-trade probability, win/continuation/reversal/trap probabilities, and an `S-Tier` / `A-Tier` / `B-Tier` / `NO_TRADE` quality rank.
+
+Market-phase routing now recognizes open-drive, trend-day, pullback, breakout-building, liquidity-trap, range, fake-breakout, and exhaustion contexts. Dynamic thresholds relax slightly for clean trend/open-drive phases and tighten in chop, range, fake-breakout, and exhaustion so high-quality early movers can survive soft penalties while stale or extended chases become `WATCH_ONLY`/`NO_TRADE` candidates.
+
+### 🧠 Signal Memory, Attribution, and Vision Sequence Scoring
+
+Outcome learning now reaches beyond broad setup buckets. The reasoning engine can apply similar-context memory, setup attribution adjustments from historical win rate / R multiple / profit factor, sector-relative-strength direction adjustments, and adaptive behavior penalties that learn from repeated late-breakout or low-quality losses.
+
+Vision scoring also supports chart-sequence memory. Consecutive Vision/candle snapshots can reward momentum acceleration, orderly retests, and direction-consistent trend progression, or penalize failed breakouts, exhaustion, and sequence conflicts before the ensemble decides whether the setup is still actionable.
+
+### ⏱️ Automated Learning-Change Replay Scheduler
+
+Learning model saves can now trigger a controlled replay/backtest check. `learning_replay_scheduler.py` fingerprints `ml_setup_model.json`, `setup_performance_learning.json`, and `projection_learning.json`, stores run metadata in `.learning_replay_state.json`, and only runs configured jobs again when a model file changes and the minimum interval has elapsed. It can be run from cron/systemd, forced after manual migrations, or enabled through `LEARNING_REPLAY_AUTORUN=true` so model writers request a replay pass automatically without repeatedly launching heavy validation jobs.
 
 ### 🧠 Phase 4 Context Memory + Phase 5 Risk Plans
 
@@ -1013,6 +1028,10 @@ OPENAI_HIGH_QUALITY_MIN_SCORE=95
 OPENAI_REASONING_MODEL=gpt-5-mini
 OPENAI_REASONING_EFFORT=high
 OPENAI_VISION_MODEL=gpt-5-mini
+LEARNING_REPLAY_AUTORUN=false
+LEARNING_REPLAY_MIN_INTERVAL_HOURS=6
+LEARNING_REPLAY_JOBS=replay
+LEARNING_REPLAY_SYMBOLS=NVDA
 POLYGON_API_KEY=
 ENABLE_OUTCOME_TRACKING=true       # Set false to skip post-alert Polygon minute-aggregate outcome checks
 OUTCOME_TRACKING_SKIP_UNAUTHORIZED=true  # Disable outcome checks for the run after Polygon plan entitlement errors

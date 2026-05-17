@@ -22,6 +22,10 @@ def save_model(model, path=MODEL_FILE):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(model, f, indent=2, sort_keys=True)
 
+    from learning_replay_scheduler import maybe_run_after_learning_change
+
+    maybe_run_after_learning_change(model_files=[path])
+
 
 def result_to_win(row):
     result = str(row.get("result", row.get("outcome", ""))).strip().upper()

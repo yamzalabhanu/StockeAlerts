@@ -978,6 +978,29 @@ python backtest_replay.py
 python daily_report_engine.py
 ```
 
+## ⏱️ Automated Learning-Change Replays
+
+Use the periodic learning replay scheduler when you want every learning-model update to be followed by a controlled replay/backtest pass. The scheduler fingerprints `ml_setup_model.json`, `setup_performance_learning.json`, and `projection_learning.json`, records the last run in `.learning_replay_state.json`, and only runs jobs again when a model file changes and the configured minimum interval has elapsed.
+
+```bash
+# Cron/systemd friendly: safe to run periodically; it exits without replaying when nothing changed.
+python learning_replay_scheduler.py
+
+# Force an immediate validation pass after a model migration or manual edit.
+python learning_replay_scheduler.py --force --jobs replay
+
+# Include heavier market-data backtests for selected symbols when your data provider is available.
+python learning_replay_scheduler.py --jobs replay,stock_backtest,options_backtest --symbols NVDA,SPY
+```
+
+To trigger the same periodic check automatically from learning-model writers, enable:
+
+```bash
+LEARNING_REPLAY_AUTORUN=true
+LEARNING_REPLAY_MIN_INTERVAL_HOURS=6
+LEARNING_REPLAY_JOBS=replay
+```
+
 ---
 
 # 🔑 Environment Variables

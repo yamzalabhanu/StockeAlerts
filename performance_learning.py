@@ -220,6 +220,10 @@ def save_learning(model: Dict[str, Any], path: str = LEARNING_FILE) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(model, f, indent=2, sort_keys=True)
 
+    from learning_replay_scheduler import maybe_run_after_learning_change
+
+    maybe_run_after_learning_change(model_files=[path])
+
 
 def build_learning_model(rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     rows = rows if rows is not None else _read_csv_rows(OUTCOME_FILE)

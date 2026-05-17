@@ -8,6 +8,13 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+
+### 🧠 Phase 4 Context Memory + Phase 5 Risk Plans
+
+Phase 4 adds enriched-context learning on top of the existing setup-history buckets. Outcome rows are now grouped by alert type, entry mode, direction, market phase, session bucket, multi-timeframe structure, chart quality, and option-liquidity bucket so the reasoning engine can reward or penalize setups that historically behaved well or poorly under similar conditions.
+
+Phase 5 converts the final ensemble/no-trade probabilities into a standardized execution-risk plan. Each reasoning report now includes a `risk_plan` with `TRADE_READY`, `REDUCED_SIZE`, or `WATCH_ONLY`, an adjusted risk percentage, estimated maximum dollars at risk, and a calculated share size when entry/stop are available.
+
 ### 🧩 Latest Options + Scan Reliability Updates
 
 Recent updates make option recommendations more resilient across Polygon/Massive-compatible providers and keep alerts cleaner when no truly orderable contract is available. The options parser now accepts common provider aliases for contract metadata (`symbol`, `contractSymbol`, `optionSymbol`, `contractType`, `strikePrice`, `expirationDate`) and quote fields (`bid_price`, `ask_price`, `bp`, `ap`, `midpoint`, `mark_price`) instead of requiring only one exact Polygon field shape.

@@ -255,7 +255,7 @@ MASTER_WATCHLIST = [
 # Static universe scanned on every cycle. Secondary/speculative symbols come in only
 # through the dynamic mover gate so the live bot targets ~40 core names + active movers
 # instead of scanning 150+ tickers continuously.
-BASE_WATCHLIST = list(dict.fromkeys(CORE_WATCHLIST))
+BASE_WATCHLIST = list(dict.fromkeys(CORE_WATCHLIST + MASTER_WATCHLIST))
 
 
 # --- AUTO WATCHLIST / DAILY MOVERS ---

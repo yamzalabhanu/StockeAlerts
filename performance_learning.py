@@ -14,6 +14,8 @@ DEFAULT_WIN_RATE = 0.50
 DEFAULT_FORECAST_ACCURACY = 0.50
 MAX_CONFIDENCE_ADJUSTMENT = 15
 MAX_SCORE_ADJUSTMENT = 12
+MIN_SIMILAR_CONTEXT_SAMPLES = 4
+MAX_CONTEXT_MEMORY_ADJUSTMENT = 10
 
 
 def default_learning_stats() -> Dict[str, Any]:
@@ -105,6 +107,67 @@ def setup_structure_key(row: Dict[str, Any]) -> str:
     return f"{alert_type}:{entry_mode}:{direction}:{mtf}:{chart}:{regime}"
 
 
+def _context_value(row: Dict[str, Any], *keys: str, default: str = "ANY") -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, dict):
+            value = value.get("phase") or value.get("structure") or value.get("quality")
+        normalized = _normalize(value, "")
+        if normalized:
+            return normalized
+    return default
+
+
+def enriched_context_key(row: Dict[str, Any]) -> str:
+    """Stable key for Phase 4 similar-context outcome memory.
+
+    This is intentionally broader than ticker-level learning.  It groups trades
+    by the dimensions now captured in the enriched outcome schema so the bot can
+    learn that, for example, a breakout call in an exhaustion phase with weak
+    option liquidity behaves differently from the same setup in an open drive.
+    """
+    alert_type = _normalize(row.get("alert_type"), "INTRADAY")
+    entry_mode = _normalize(row.get("entry_mode"), "STANDARD")
+    direction = _normalize(row.get("direction"), "ANY")
+    phase = _context_value(row, "market_phase", default="ANY")
+    session = _context_value(row, "session_time_bucket", "session_bucket", default="ANY")
+    mtf = _context_value(row, "mtf_structure", default="ANY")
+    chart = _context_value(row, "chart_structure", "vision_quality", default="ANY")
+    option_liquidity = _option_liquidity_bucket(row)
+    return f"CTX:{alert_type}:{entry_mode}:{direction}:{phase}:{session}:{mtf}:{chart}:{option_liquidity}"
+
+
+def _option_liquidity_bucket(row: Dict[str, Any]) -> str:
+    spread = _safe_float(row.get("option_spread_pct"), None)
+    volume = _safe_float(row.get("option_volume"), None)
+    open_interest = _safe_float(row.get("option_open_interest"), None)
+    if spread is None and volume is None and open_interest is None:
+        return "ANY"
+    if spread is not None and spread > 25:
+        return "WIDE_SPREAD"
+    if (volume is not None and volume >= 1000) or (open_interest is not None and open_interest >= 2000):
+        return "DEEP_LIQUIDITY"
+    if (volume is not None and volume >= 200) or (open_interest is not None and open_interest >= 500):
+        return "NORMAL_LIQUIDITY"
+    return "THIN_LIQUIDITY"
+
+
+def _context_group_keys(row: Dict[str, Any]) -> Iterable[str]:
+    alert_type = _normalize(row.get("alert_type"), "INTRADAY")
+    entry_mode = _normalize(row.get("entry_mode"), "STANDARD")
+    direction = _normalize(row.get("direction"), "ANY")
+    phase = _context_value(row, "market_phase", default="ANY")
+    session = _context_value(row, "session_time_bucket", "session_bucket", default="ANY")
+    mtf = _context_value(row, "mtf_structure", default="ANY")
+    chart = _context_value(row, "chart_structure", "vision_quality", default="ANY")
+    liquidity = _option_liquidity_bucket(row)
+    yield f"CTX_MODE:{entry_mode}:{direction}:{phase}"
+    yield f"CTX_SESSION:{entry_mode}:{direction}:{phase}:{session}"
+    yield f"CTX_STRUCTURE:{entry_mode}:{direction}:{phase}:{mtf}:{chart}"
+    yield f"CTX_LIQUIDITY:{alert_type}:{entry_mode}:{direction}:{phase}:{liquidity}"
+    yield enriched_context_key(row)
+
+
 def _group_keys(row: Dict[str, Any]) -> Iterable[str]:
     alert_type = _normalize(row.get("alert_type"), "INTRADAY")
     entry_mode = _normalize(row.get("entry_mode"), "STANDARD")
@@ -114,6 +177,7 @@ def _group_keys(row: Dict[str, Any]) -> Iterable[str]:
     yield f"MODE:{entry_mode}"
     yield f"MODE_DIR:{entry_mode}:{direction}"
     yield f"STRUCTURE:{setup_structure_key(row)}"
+    yield from _context_group_keys(row)
 
 
 def _forecast_accuracy(row: Dict[str, Any]) -> Optional[float]:
@@ -301,6 +365,48 @@ def calibrate_confidence(base_confidence: Any, setup_context: Dict[str, Any]) ->
 def score_adjustment(setup_context: Dict[str, Any]) -> float:
     learning = get_setup_learning(setup_context)
     return _safe_float((learning.get("stats") or {}).get("score_adjustment"))
+
+
+def similar_context_memory(row: Dict[str, Any], model: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return Phase 4 historical stats for the closest enriched context bucket."""
+    model = model or load_learning()
+    buckets = model.get("buckets") or {}
+    best_key = None
+    best_stats: Dict[str, Any] | None = None
+    for key in reversed(list(_context_group_keys(row))):
+        stats = buckets.get(key) or {}
+        if _safe_int(stats.get("closed")) >= MIN_SIMILAR_CONTEXT_SAMPLES:
+            best_key = key
+            best_stats = stats
+            break
+    if best_stats is None:
+        return {
+            "key": enriched_context_key(row),
+            "status": "BASELINE",
+            "closed": 0,
+            "win_rate": DEFAULT_WIN_RATE,
+            "forecast_accuracy": DEFAULT_FORECAST_ACCURACY,
+            "score_adjustment": 0.0,
+            "confidence_adjustment": 0.0,
+            "reason": "Not enough matching enriched-context outcomes yet",
+        }
+
+    completed = _complete_learning_stats(best_stats)
+    edge = (completed["win_rate"] - DEFAULT_WIN_RATE) * 0.75 + (completed["forecast_accuracy"] - DEFAULT_FORECAST_ACCURACY) * 0.25
+    sample_factor = min(1.0, completed["closed"] / 20.0)
+    adjustment = round(max(-MAX_CONTEXT_MEMORY_ADJUSTMENT, min(MAX_CONTEXT_MEMORY_ADJUSTMENT, edge * 100.0 * sample_factor)), 2)
+    return {
+        "key": best_key,
+        "status": "HISTORICAL",
+        "closed": completed["closed"],
+        "win_rate": completed["win_rate"],
+        "forecast_accuracy": completed["forecast_accuracy"],
+        "avg_max_gain_pct": completed.get("avg_max_gain_pct", 0.0),
+        "avg_max_loss_pct": completed.get("avg_max_loss_pct", 0.0),
+        "score_adjustment": adjustment,
+        "confidence_adjustment": round(adjustment * 0.8, 2),
+        "reason": f"Similar context {best_key} won {completed['win_rate'] * 100:.1f}% over {completed['closed']} closed alerts",
+    }
 
 
 def priority_bonus(setup_context: Dict[str, Any]) -> float:

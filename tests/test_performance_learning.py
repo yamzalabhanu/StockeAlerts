@@ -167,5 +167,68 @@ class PerformanceLearningFallbackTests(unittest.TestCase):
         self.assertIn("Forecast 50.0%", message)
 
 
+class PhaseFourFiveLearningTests(unittest.TestCase):
+    def test_similar_context_memory_uses_enriched_phase_liquidity_buckets(self):
+        from performance_learning import build_learning_model, similar_context_memory
+
+        rows = []
+        for _ in range(5):
+            rows.append(
+                {
+                    "alert_type": "INTRADAY",
+                    "entry_mode": "BREAKOUT",
+                    "direction": "CALL",
+                    "market_phase": "OPEN_DRIVE",
+                    "session_time_bucket": "MORNING",
+                    "mtf_structure": "STRONG_ALIGNMENT",
+                    "chart_structure": "ELITE",
+                    "option_spread_pct": "8",
+                    "option_volume": "1500",
+                    "result": "WIN",
+                    "max_gain_pct": "7",
+                    "max_loss_pct": "1",
+                    "forecast_accuracy_pct": "82",
+                }
+            )
+        rows.append({**rows[0], "result": "LOSS", "forecast_accuracy_pct": "20"})
+        model = build_learning_model(rows)
+
+        memory = similar_context_memory(
+            {
+                "alert_type": "INTRADAY",
+                "entry_mode": "BREAKOUT",
+                "direction": "CALL",
+                "market_phase": "OPEN_DRIVE",
+                "session_time_bucket": "MORNING",
+                "mtf_structure": "STRONG_ALIGNMENT",
+                "chart_structure": "ELITE",
+                "option_spread_pct": "7",
+                "option_volume": "1800",
+            },
+            model=model,
+        )
+
+        self.assertEqual(memory["status"], "HISTORICAL")
+        self.assertIn("CTX:", memory["key"])
+        self.assertGreater(memory["score_adjustment"], 0)
+
+    def test_phase5_execution_plan_blocks_watch_only_for_trap_risk(self):
+        from risk_utils import phase5_execution_plan
+
+        plan = phase5_execution_plan(
+            final_score=88,
+            probabilities={"win_probability": 0.64, "trap_probability": 0.50},
+            no_trade={"score": 55},
+            execution={"quality": "GOOD"},
+            setup={"entry": 100, "stop": 98, "risk_reward": 2.0},
+            account_size=10000,
+            base_risk_pct=0.01,
+        )
+
+        self.assertEqual(plan["action"], "WATCH_ONLY")
+        self.assertEqual(plan["position_size"], 0)
+        self.assertEqual(plan["adjusted_risk_pct"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

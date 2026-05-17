@@ -17,11 +17,12 @@ from ensemble_confidence import (
 from multi_timeframe_engine import analyze_multi_timeframe_structure
 from setup_filters import evaluate_setup_quality
 from vision_ai import score_chart_structure
-from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key
+from performance_learning import calibrate_confidence, priority_bonus, score_adjustment, setup_structure_key, similar_context_memory
 from sector_filter import sector_direction_adjustment
 from adaptive_scoring import behavior_penalty
 from probabilistic_quality import DEFAULT_PENALTIES, classify_score, probabilistic_penalty_profile
 from trade_attribution import setup_attribution_adjustment
+from risk_utils import phase5_execution_plan
 from config import (
     ALLOW_EXECUTION_WARNING,
     ALLOW_MTF_MIXED,
@@ -29,6 +30,8 @@ from config import (
     EARLY_SESSION_GRACE_ENABLED,
     EARLY_SESSION_MIN_SCORE_BUFFER,
     MIN_SCORE,
+    ACCOUNT_SIZE,
+    RISK_PER_TRADE_PCT,
 )
 
 
@@ -255,8 +258,13 @@ def build_reasoning_report(
         "entry_mode": setup.get("entry_mode", "SWING" if trade_type == "SWING" else "STANDARD"),
         "direction": direction,
         "market_regime": regime.get("regime"),
+        "market_phase": market_phase.get("phase"),
+        "session_time_bucket": tech.get("session_time_bucket") or setup.get("session_time_bucket"),
         "mtf_structure": mtf.get("structure"),
         "chart_structure": vision.get("quality"),
+        "option_spread_pct": setup.get("option_spread_pct") or tech.get("option_spread_pct"),
+        "option_volume": setup.get("option_volume") or tech.get("option_volume"),
+        "option_open_interest": setup.get("option_open_interest") or tech.get("option_open_interest"),
     }
     learning_context["setup_key"] = setup_structure_key(learning_context)
 
@@ -267,6 +275,11 @@ def build_reasoning_report(
         target.append(f"Setup attribution adjusted score by {attribution['adjustment']:+d}: {attribution.get('reason')}")
 
     learning_score_adjustment = score_adjustment(learning_context)
+    context_memory = similar_context_memory(learning_context)
+    if context_memory.get("score_adjustment"):
+        score += context_memory["score_adjustment"]
+        target = reasons if context_memory["score_adjustment"] > 0 else warnings
+        target.append(f"Phase 4 similar-context memory adjusted score by {context_memory['score_adjustment']:+.1f}: {context_memory.get('reason')}")
     learning_priority_bonus = priority_bonus(learning_context)
     if learning_score_adjustment:
         score += learning_score_adjustment
@@ -335,6 +348,18 @@ def build_reasoning_report(
     quality_rank = alert_quality_rank(final_score, probabilities, no_trade)
     probabilistic_tier = classify_score(final_score)
     adaptive_min_score = dynamic_min_score(regime_name, market_phase.get("phase"), MIN_SCORE)
+    risk_plan = phase5_execution_plan(
+        final_score=final_score,
+        probabilities=probabilities,
+        no_trade=no_trade,
+        execution=execution,
+        setup=setup,
+        tech=tech,
+        account_size=ACCOUNT_SIZE,
+        base_risk_pct=RISK_PER_TRADE_PCT,
+    )
+    if risk_plan.get("action") == "WATCH_ONLY" and final_score < 92:
+        warnings.append("Phase 5 risk plan downgraded execution to watch-only")
 
     if no_trade.get("is_no_trade") and final_score < 90:
         decision = "REJECT"
@@ -371,6 +396,8 @@ def build_reasoning_report(
         adaptive_min_score=adaptive_min_score,
         probabilistic_tier=probabilistic_tier,
         no_trade=no_trade,
+        context_memory=context_memory,
+        risk_plan=risk_plan,
     )
 
     return {
@@ -395,6 +422,8 @@ def build_reasoning_report(
         "adaptive_behavior_adjustment": adaptive_behavior_adjustment,
         "setup_attribution": attribution,
         "probabilistic_penalties": probabilistic_profile,
+        "context_memory": context_memory,
+        "risk_plan": risk_plan,
         "reasons": reasons,
         "warnings": warnings,
         "reject_reasons": reject_reasons,
@@ -429,6 +458,8 @@ def _build_narrative(
     adaptive_min_score=None,
     probabilistic_tier=None,
     no_trade=None,
+    context_memory=None,
+    risk_plan=None,
 ):
 
     regime = regime or {}
@@ -442,6 +473,8 @@ def _build_narrative(
     component_scores = component_scores or {}
     probabilities = probabilities or {}
     no_trade = no_trade or {}
+    context_memory = context_memory or {}
+    risk_plan = risk_plan or {}
 
     lines = [
         f"AI Reasoning: {trade_type} {direction} {ticker} classified as {decision} with composite score {final_score}/100.",
@@ -460,6 +493,21 @@ def _build_narrative(
             f"forecast accuracy {learning_stats.get('forecast_accuracy', 0) * 100:.1f}%; "
             f"confidence {learning_confidence.get('base_confidence', 0):.1f}% -> {learning_confidence.get('calibrated_confidence', 0):.1f}%; "
             f"priority bonus {learning_priority_bonus:+.1f}."
+        )
+
+    if context_memory:
+        lines.append(
+            "Phase 4 context memory: "
+            f"{context_memory.get('status', 'BASELINE')} via {context_memory.get('key')}; "
+            f"adjustment {context_memory.get('score_adjustment', 0):+.1f}."
+        )
+
+    if risk_plan:
+        lines.append(
+            "Phase 5 risk plan: "
+            f"{risk_plan.get('action')} at {risk_plan.get('risk_multiplier', 0):.2f}x risk; "
+            f"max risk ${risk_plan.get('max_risk_dollars', 0):.2f}; "
+            f"size {risk_plan.get('position_size', 0)}."
         )
 
     if reasons:

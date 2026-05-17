@@ -57,7 +57,7 @@ def log_alert(row: Dict[str, Any]):
         "premarket_high", "premarket_low", "prev_high", "prev_low",
         "current_volume", "avg_20_volume",
         "intraday_confirmations", "intraday_required", "intraday_reason",
-        "market_bias", "market_details", "market_regime", "market_phase", "ensemble_score", "quality_rank", "win_probability", "trap_probability", "no_trade_score", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons",
+        "market_bias", "market_details", "market_regime", "market_phase", "ensemble_score", "quality_rank", "win_probability", "trap_probability", "no_trade_score", "risk_action", "risk_multiplier", "max_risk_dollars", "phase4_context_key", "phase4_context_adjustment", "mtf_structure", "chart_structure", "setup_key", "learning_key", "learning_win_rate", "forecast_accuracy", "priority_bonus", "reasons",
         "atr_extension", "wick_ratio", "candle_body_pct", "distance_from_vwap", "distance_from_ema21", "rel_volume", "spread_pct", "option_volume", "open_interest", "sector_relative_strength", "deep_ai_approval", "deep_ai_rejection_reason",
         "options_flow_bias", "options_flow_score", "options_flow_gamma_squeeze",
     ]
@@ -565,6 +565,9 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         quality_rank = reasoning.get("quality_rank") or "n/a"
         no_trade_score = (reasoning.get("no_trade") or {}).get("score", 0)
         market_phase = (reasoning.get("market_phase") or {}).get("phase", "UNKNOWN")
+        risk_plan = reasoning.get("risk_plan") or {}
+        risk_action = risk_plan.get("action", "n/a")
+        risk_multiplier = float(risk_plan.get("risk_multiplier") or 0)
         options_flow_text = ""
         if options_flow:
             if isinstance(options_flow, dict):
@@ -625,6 +628,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🏅 *Rank Score:* {ranking_score:.1f} | *Tier:* {quality_rank}\n"
             f"🧭 *Phase:* {market_phase} | *No-Trade:* {no_trade_score}/100\n"
             f"📈 *Prob:* Win {float(probabilities.get('win_probability', 0)) * 100:.0f}% | Trap {float(probabilities.get('trap_probability', 0)) * 100:.0f}%\n"
+            f"🛡️ *Phase 5 Risk:* {risk_action} | Size {risk_multiplier:.2f}x | Max ${float(risk_plan.get('max_risk_dollars') or 0):.0f}\n"
             f"🎯 *Mode:* {entry_mode} — {mode_reason}\n"
             f"🤖 *AI:* {ai['verdict']} ({ai['confidence']}%) | Hist Adj {ai.get('confidence_adjustment', 0):+.1f}\n"
             f"🏆 *Quality:* {ai['setup_quality']} | *Timing:* {ai['entry_timing']}\n"
@@ -657,12 +661,15 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             print(f"{ticker}: telegram send failed; intraday alert not counted or ordered")
             return False
 
-        maybe_buy_recommended_option(
-            ticker=ticker,
-            direction=direction,
-            option_contract=option_contract or {},
-            telegram_sender=self.send_telegram_msg,
-        )
+        if risk_action == "WATCH_ONLY":
+            print(f"{ticker}: Phase 5 risk plan is WATCH_ONLY; skipping automated option buy")
+        else:
+            maybe_buy_recommended_option(
+                ticker=ticker,
+                direction=direction,
+                option_contract=option_contract or {},
+                telegram_sender=self.send_telegram_msg,
+            )
 
         mark_alerted_today(ticker)
 
@@ -723,6 +730,11 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             "win_probability": (reasoning.get("probabilities") or {}).get("win_probability"),
             "trap_probability": (reasoning.get("probabilities") or {}).get("trap_probability"),
             "no_trade_score": (reasoning.get("no_trade") or {}).get("score"),
+            "risk_action": risk_action,
+            "risk_multiplier": risk_plan.get("risk_multiplier"),
+            "max_risk_dollars": risk_plan.get("max_risk_dollars"),
+            "phase4_context_key": (reasoning.get("context_memory") or {}).get("key"),
+            "phase4_context_adjustment": (reasoning.get("context_memory") or {}).get("score_adjustment"),
             "mtf_structure": (reasoning.get("mtf") or {}).get("structure"),
             "chart_structure": (reasoning.get("vision") or {}).get("quality"),
             "setup_key": setup_key,

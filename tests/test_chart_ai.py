@@ -190,7 +190,7 @@ class ChartVisionTests(unittest.TestCase):
         self.assertEqual(kwargs["model"], DEFAULT_VISION_MODEL)
         self.assertEqual(DEFAULT_VISION_MODEL, "gpt-5-mini")
         self.assertEqual(kwargs["response_format"]["type"], "json_schema")
-        self.assertEqual(kwargs["reasoning_effort"], "medium")
+        self.assertEqual(kwargs["reasoning_effort"], "high")
         self.assertNotIn("temperature", kwargs)
         text = kwargs["messages"][0]["content"][0]["text"]
         self.assertIn("failed breakouts", text)

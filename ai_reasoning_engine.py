@@ -623,6 +623,183 @@ def build_reasoning_report(
     }
 
 
+def _direction_label(direction):
+    direction = str(direction or "").upper()
+    if direction == "PUT":
+        return "bearish"
+    if direction == "CALL":
+        return "bullish"
+    return "directional"
+
+
+def _chart_quality_label(quality):
+    quality = str(quality or "").upper()
+    if quality == "ELITE":
+        return "Very strong"
+    if quality == "GOOD":
+        return "Strong"
+    if quality == "POOR":
+        return "Weak"
+    return "Unclear"
+
+
+def _market_support_label(direction, regime_name):
+    direction = str(direction or "").upper()
+    regime_name = str(regime_name or "").upper()
+    aligned = (
+        (direction == "CALL" and regime_name == "TRENDING_BULL")
+        or (direction == "PUT" and regime_name == "TRENDING_BEAR")
+    )
+    if aligned:
+        return "Strong"
+    if regime_name in {"TRENDING_BULL", "TRENDING_BEAR"}:
+        return "Weak/conflicting"
+    if regime_name in {"CHOPPY", "HIGH_VOL"}:
+        return "Mixed/cautious"
+    return "Unclear"
+
+
+def _options_confirmation_label(options_reasons, options_warnings):
+    warning_text = " ".join(str(warning) for warning in options_warnings).lower()
+    has_conflict = "conflicts" in warning_text or "not order-ready" in warning_text
+    if has_conflict:
+        return "Weak/conflicting"
+    if options_reasons and not options_warnings:
+        return "Strong"
+    if options_reasons and options_warnings:
+        return "Mixed"
+    if options_warnings:
+        return "Weak"
+    return "Unclear"
+
+
+def _entry_quality_label(execution_quality, setup_status):
+    execution_quality = str(execution_quality or "").upper()
+    setup_status = str(setup_status or "").upper()
+    if execution_quality == "GOOD" and setup_status == "PASS":
+        return "Clean"
+    if execution_quality in {"WARNING", "BAD"} or setup_status in {"WARNING", "REJECT"}:
+        return "Not ideal"
+    return "Unclear"
+
+
+def _trade_status_label(risk_plan, setup_status, options_confirmation, no_trade):
+    action = str((risk_plan or {}).get("action") or "").upper()
+    setup_status = str(setup_status or "").upper()
+    if action == "WATCH_ONLY" or (no_trade or {}).get("is_no_trade"):
+        return "Watch only / possibly skip"
+    if setup_status == "REJECT" or options_confirmation in {"Weak/conflicting", "Weak"}:
+        if action == "REDUCED_SIZE":
+            return "Caution / reduced size / possibly skip"
+        return "Caution / possibly skip"
+    if action == "REDUCED_SIZE":
+        return "Reduced size"
+    if action:
+        return action.replace("_", " ").title()
+    return "Caution"
+
+
+def _best_action_label(setup_status, options_confirmation, execution_quality):
+    setup_status = str(setup_status or "").upper()
+    execution_quality = str(execution_quality or "").upper()
+    if setup_status == "REJECT" or options_confirmation in {"Weak/conflicting", "Weak"}:
+        return "Wait for cleaner confirmation or a better option contract"
+    if execution_quality == "WARNING" or setup_status == "WARNING":
+        return "Wait for a cleaner entry trigger, or take reduced size with strict risk control"
+    return "Proceed only if price confirms the thesis and risk/reward remains acceptable"
+
+
+def _primary_quality_issue(setup_status, options_confirmation, execution_quality):
+    setup_status = str(setup_status or "").upper()
+    execution_quality = str(execution_quality or "").upper()
+    issues = []
+    if setup_status == "REJECT":
+        issues.append("the setup filter rejected it")
+    elif setup_status == "WARNING":
+        issues.append("the setup filter only gave a warning")
+    if options_confirmation == "Weak/conflicting":
+        issues.append("options flow conflicts with the idea or the contract is not order-ready")
+    elif options_confirmation == "Weak":
+        issues.append("options confirmation is weak")
+    if execution_quality == "WARNING":
+        issues.append("entry quality is not ideal")
+    elif execution_quality == "BAD":
+        issues.append("execution quality is poor")
+    if not issues:
+        issues.append("it still needs live price confirmation")
+    if len(issues) == 1:
+        return issues[0]
+    return ", ".join(issues[:-1]) + ", and " + issues[-1]
+
+
+def _build_human_readable_summary(
+    ticker,
+    direction,
+    mtf,
+    execution,
+    setup_quality,
+    vision,
+    regime,
+    options_reasons,
+    options_warnings,
+    risk_plan,
+    no_trade,
+):
+    bias_word = _direction_label(direction)
+    idea_direction = f"{bias_word} {ticker} {str(direction or '').lower()} idea".strip()
+    mtf_structure = str((mtf or {}).get("structure") or "").upper()
+    chart_quality = _chart_quality_label((vision or {}).get("quality"))
+    technical_alignment = (
+        "strong technical alignment"
+        if mtf_structure in {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}
+        else "mixed technical alignment"
+    )
+    options_confirmation = _options_confirmation_label(options_reasons, options_warnings)
+    execution_quality = (execution or {}).get("quality")
+    setup_status = (setup_quality or {}).get("status")
+    entry_quality = _entry_quality_label(execution_quality, setup_status)
+    market_support = _market_support_label(direction, (regime or {}).get("regime"))
+    trade_status = _trade_status_label(risk_plan, setup_status, options_confirmation, no_trade)
+    best_action = _best_action_label(setup_status, options_confirmation, execution_quality)
+    quality_issue = _primary_quality_issue(setup_status, options_confirmation, execution_quality)
+
+    conclusion = (
+        f"This is a {idea_direction} with {technical_alignment} "
+        f"but {options_confirmation.lower()} execution confirmation."
+    )
+    approval_sentence = (
+        "The model likes the direction, but not the trade quality enough to fully approve it."
+        if trade_status.lower().startswith(("caution", "watch")) or entry_quality == "Not ideal"
+        else "The model likes both the direction and the current trade quality, but it still requires disciplined risk control."
+    )
+    one_sentence = (
+        f"{ticker} looks {bias_word} and the model sees strong "
+        f"{('downside' if str(direction).upper() == 'PUT' else 'upside')} potential, "
+        f"but the trade is not clean enough because {quality_issue}."
+    )
+
+    return "\n".join([
+        "Best human-readable conclusion",
+        "",
+        conclusion,
+        "",
+        approval_sentence,
+        "Practical interpretation",
+        "",
+        "I would summarize it as:",
+        "",
+        f"Bias: {bias_word.title()}",
+        f"Chart quality: {chart_quality}",
+        f"Market support: {market_support}",
+        f"Options confirmation: {options_confirmation}",
+        f"Entry quality: {entry_quality}",
+        f"Trade status: {trade_status}",
+        f"Best action: {best_action}",
+        "One-sentence summary",
+        "",
+        one_sentence,
+    ])
+
 def _build_narrative(
     ticker,
     trade_type,
@@ -758,7 +935,21 @@ def _build_narrative(
     if reject_reasons:
         lines.append("Reject risks converted to penalties: " + "; ".join(reject_reasons[:4]) + ".")
 
-    return "\n".join(lines)
+    human_summary = _build_human_readable_summary(
+        ticker=ticker,
+        direction=direction,
+        mtf=mtf,
+        execution=execution,
+        setup_quality=setup_quality,
+        vision=vision,
+        regime=regime,
+        options_reasons=options_reasons,
+        options_warnings=options_warnings,
+        risk_plan=risk_plan,
+        no_trade=no_trade,
+    )
+
+    return human_summary + "\n\nDetailed model diagnostics\n\n" + "\n".join(lines)
 
 
 def should_send_reasoned_alert(report: Dict[str, Any], min_score=80) -> bool:

@@ -66,6 +66,37 @@ class DynamicOptionsReasoningTests(unittest.TestCase):
         self.assertGreater(report["options_analysis"]["score_adjustment"], 0)
         self.assertTrue(any("Options analysis adjusted score" in reason for reason in report["reasons"]))
 
+    def test_reasoning_starts_with_human_readable_trade_summary(self):
+        setup = {
+            "direction": "PUT",
+            "score": 88,
+            "risk_reward": 2.67,
+            "options_flow": {"status": "OK", "bias": "BULLISH", "score": 28},
+            "option_contract": {"status": "SKIP", "reason": "No option passed filters"},
+        }
+
+        with patch("ai_reasoning_engine.detect_market_regime", return_value={"regime": "TRENDING_BEAR", "confidence": 85}), \
+            patch("ai_reasoning_engine.analyze_multi_timeframe_structure", return_value={"structure": "GOOD_ALIGNMENT", "aligned_timeframes": 3}), \
+            patch("ai_reasoning_engine.evaluate_execution_quality", return_value={"quality": "WARNING", "warnings": ["Weak candle body"]}), \
+            patch("ai_reasoning_engine.evaluate_setup_quality", return_value={"status": "REJECT", "warnings": ["Breakout directly into resistance"]}), \
+            patch("ai_reasoning_engine.score_chart_structure", return_value={"quality": "ELITE", "warnings": []}), \
+            patch("ai_reasoning_engine.score_adjustment", return_value=0), \
+            patch("ai_reasoning_engine.priority_bonus", return_value=0):
+            report = build_reasoning_report("ARKF", setup, {}, bot=None, trade_type="SWING")
+
+        narrative = report["narrative"]
+        self.assertTrue(narrative.startswith("Best human-readable conclusion"))
+        self.assertIn("This is a bearish ARKF put idea with strong technical alignment", narrative)
+        self.assertIn("Practical interpretation", narrative)
+        self.assertIn("Bias: Bearish", narrative)
+        self.assertIn("Chart quality: Very strong", narrative)
+        self.assertIn("Market support: Strong", narrative)
+        self.assertIn("Options confirmation: Weak/conflicting", narrative)
+        self.assertIn("Entry quality: Not ideal", narrative)
+        self.assertIn("Best action: Wait for cleaner confirmation or a better option contract", narrative)
+        self.assertIn("One-sentence summary", narrative)
+        self.assertIn("Detailed model diagnostics", narrative)
+
     def test_options_conflict_adds_warning_and_negative_adjustment(self):
         setup = {
             "direction": "CALL",

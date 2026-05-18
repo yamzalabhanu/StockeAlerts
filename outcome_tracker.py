@@ -159,6 +159,12 @@ def _enriched_context_fields(setup_context, alert_time):
         "open_interest": _first_context_value(
             context, "open_interest", ("option_contract", "open_interest")
         ),
+        "option_contract_symbol": _first_context_value(
+            context, "option_contract_symbol", ("option_contract", "contract_symbol")
+        ),
+        "option_entry_price": _first_context_value(
+            context, "option_entry_price", ("option_contract", "ask"), ("option_contract", "mid"), ("option_contract", "bid")
+        ),
         "sector_relative_strength": _first_context_value(
             context,
             "sector_relative_strength",
@@ -171,6 +177,96 @@ def _enriched_context_fields(setup_context, alert_time):
         "deep_ai_rejection_reason": _first_context_value(
             context, "deep_ai_rejection_reason", ("ai", "reason"), ("reasoning", "reject_reasons")
         ),
+    }
+
+
+def _option_entry_price(option_contract):
+    if not isinstance(option_contract, dict):
+        return 0.0
+    for key in ("ask", "mid", "mark", "last", "bid"):
+        value = safe_float(option_contract.get(key), 0.0)
+        if value > 0:
+            return value
+    return 0.0
+
+
+def _bar_price(bar, attr, default=0.0):
+    return safe_float(getattr(bar, attr, default), default)
+
+
+def _option_outcome_fields(setup_context, alert_time, end_time):
+    option_contract = (setup_context or {}).get("option_contract") or {}
+    if not isinstance(option_contract, dict):
+        return {}
+    contract_symbol = option_contract.get("contract_symbol")
+    entry = _option_entry_price(option_contract)
+    if not contract_symbol or entry <= 0:
+        return {}
+
+    target_price = entry * (1 + (OPTION_OUTCOME_TARGET_PCT / 100.0))
+    stop_price = entry * max(0.01, 1 - (OPTION_OUTCOME_STOP_PCT / 100.0))
+    target_hit = False
+    stop_hit = False
+    max_gain = 0.0
+    max_loss = 0.0
+
+    try:
+        option_bars = list(
+            client.list_aggs(
+                ticker=contract_symbol,
+                multiplier=1,
+                timespan="minute",
+                from_=alert_time.date().isoformat(),
+                to=end_time.date().isoformat(),
+                adjusted=True,
+                sort="asc",
+                limit=50000,
+            )
+        )
+    except Exception as e:
+        if not (_skip_unauthorized_outcomes() and _is_polygon_not_authorized_error(e)):
+            print(f"{contract_symbol}: option outcome fetch error {e}")
+        return {
+            "option_contract_symbol": contract_symbol,
+            "option_entry_price": round(entry, 2),
+            "option_target_price": round(target_price, 2),
+            "option_stop_price": round(stop_price, 2),
+        }
+
+    for bar in option_bars:
+        bar_time = dt.datetime.fromtimestamp(bar.timestamp / 1000, tz=dt.timezone.utc)
+        if bar_time < alert_time or bar_time > end_time:
+            continue
+        high = _bar_price(bar, "high")
+        low = _bar_price(bar, "low")
+        if high >= target_price:
+            target_hit = True
+        if low <= stop_price:
+            stop_hit = True
+        max_gain = max(max_gain, ((high - entry) / entry) * 100)
+        max_loss = max(max_loss, ((entry - low) / entry) * 100)
+        if target_hit or stop_hit:
+            break
+
+    if target_hit and not stop_hit:
+        result = "WIN"
+    elif stop_hit and not target_hit:
+        result = "LOSS"
+    elif target_hit and stop_hit:
+        result = "MIXED"
+    else:
+        result = "OPEN_OR_BREAKEVEN"
+
+    return {
+        "option_contract_symbol": contract_symbol,
+        "option_entry_price": round(entry, 2),
+        "option_target_price": round(target_price, 2),
+        "option_stop_price": round(stop_price, 2),
+        "option_target_hit": target_hit,
+        "option_stop_hit": stop_hit,
+        "option_result": result,
+        "option_max_gain_pct": round(max_gain, 2),
+        "option_max_loss_pct": round(max_loss, 2),
     }
 
 
@@ -295,6 +391,8 @@ def track_outcome(
         "ai_confidence": setup_context.get("ai_confidence"),
         "calibrated_confidence": setup_context.get("calibrated_confidence"),
         "score": setup_context.get("score"),
+        "ml_probability": setup_context.get("ml_probability"),
+        "win_probability": setup_context.get("win_probability"),
         "expected_move_pct": round(_move_pct(direction, entry, target), 2),
         "result": result,
         "target_hit": target_hit,
@@ -305,6 +403,7 @@ def track_outcome(
         "max_loss_pct": round(max_loss, 2),
     }
     row.update(_enriched_context_fields(setup_context, alert_time))
+    row.update(_option_outcome_fields(setup_context, alert_time, end_time))
     row["forecast_accuracy_pct"] = _forecast_accuracy(row["expected_move_pct"], row["max_gain_pct"])
 
     append_outcome_row(OUTCOME_FILE, row)

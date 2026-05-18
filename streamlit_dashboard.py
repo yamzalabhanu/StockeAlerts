@@ -2,6 +2,7 @@ import csv
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from daily_report_engine import probability_calibration_summary
 
 st.set_page_config(page_title="Trading Bot Dashboard", layout="wide")
 
@@ -81,6 +82,34 @@ with col2:
 st.subheader("Setup Quality")
 if "setup_quality" in df:
     st.bar_chart(df["setup_quality"].value_counts())
+
+
+st.subheader("Probability Calibration")
+try:
+    calibration = probability_calibration_summary()
+    if calibration.get("samples"):
+        st.metric(
+            "Probability MAE",
+            round(float(calibration.get("mean_absolute_error") or 0), 3),
+            help="Mean absolute error between predicted win probability and closed outcome.",
+        )
+        cal_df = pd.DataFrame(calibration.get("buckets", []))
+        st.dataframe(cal_df, use_container_width=True)
+        non_empty = cal_df[cal_df["samples"] > 0] if not cal_df.empty and "samples" in cal_df else cal_df
+        if not non_empty.empty:
+            fig = px.bar(
+                non_empty,
+                x="label",
+                y=["avg_predicted_probability", "realized_win_rate"],
+                barmode="group",
+                title="Predicted vs Realized Win Rate by Probability Bucket",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No closed probability samples available yet.")
+except Exception as e:
+    st.warning(f"Probability calibration unavailable: {e}")
+
 
 st.subheader("Raw Data")
 st.dataframe(df, use_container_width=True)

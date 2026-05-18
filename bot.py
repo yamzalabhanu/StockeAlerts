@@ -32,6 +32,7 @@ from option_order_manager import (
     maybe_buy_recommended_option,
 )
 from alert_history import mark_alerted_today, was_alerted_today
+from ml_sklearn_model import build_ml_feature_row, adjust_score_with_logistic
 
 
 ai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -67,6 +68,89 @@ def log_alert(row: Dict[str, Any]):
         if not file_exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def option_contract_has_stale_fallback(option_contract: Dict[str, Any] | None) -> bool:
+    """Return True when the selected contract is a stale fallback reference."""
+    if not isinstance(option_contract, dict):
+        option_contract = getattr(option_contract, "__dict__", {}) if option_contract else {}
+    reason = str(option_contract.get("reason") or "").lower()
+    return "stale" in reason and "fallback" in reason
+
+
+def success_rate_block_reason(setup: Dict[str, Any] | None, reasoning: Dict[str, Any] | None = None) -> str:
+    """Strict validation guard used when optimizing for realized success rate."""
+    if not SUCCESS_RATE_MODE:
+        return ""
+    setup = setup or {}
+    reasoning = reasoning or setup.get("ai_reasoning") or {}
+    risk_action = str(((reasoning.get("risk_plan") or {}).get("action")) or setup.get("risk_action") or "").upper()
+    decision = str(reasoning.get("decision") or setup.get("decision") or setup.get("tier") or "").upper()
+    quality_rank = str(reasoning.get("quality_rank") or setup.get("quality_rank") or "").upper()
+    probabilities = reasoning.get("probabilities") or {}
+    calibrated_probability = probabilities.get("win_probability")
+    if calibrated_probability in (None, ""):
+        calibrated_probability = setup.get("ml_probability")
+    if calibrated_probability in (None, ""):
+        calibrated_probability = setup.get("calibrated_confidence")
+        try:
+            calibrated_probability = float(calibrated_probability) / 100.0
+        except Exception:
+            calibrated_probability = None
+
+    if risk_action == "WATCH_ONLY":
+        return "SUCCESS_RATE_MODE blocked WATCH_ONLY risk plan"
+    if decision == "NO_TRADE" or quality_rank == "NO_TRADE" or (reasoning.get("no_trade") or {}).get("is_no_trade"):
+        return "SUCCESS_RATE_MODE blocked NO_TRADE setup"
+    if option_contract_has_stale_fallback(setup.get("option_contract")):
+        return "SUCCESS_RATE_MODE blocked stale fallback option contract"
+    try:
+        if calibrated_probability is not None and float(calibrated_probability) < SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY:
+            return (
+                "SUCCESS_RATE_MODE blocked low calibrated probability "
+                f"{float(calibrated_probability):.2f} < {SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY:.2f}"
+            )
+    except Exception:
+        return "SUCCESS_RATE_MODE blocked unreadable calibrated probability"
+    return ""
+
+
+def intraday_ranking_score(setup: Dict[str, Any], ai: Dict[str, Any], intraday_info: Dict[str, Any], entry_mode: str, learning_context: Dict[str, Any], options_flow=None) -> float:
+    setup = setup or {}
+    ai = ai or {}
+    intraday_info = intraday_info or {}
+    reasoning = setup.get("ai_reasoning") or {}
+    score = float(setup.get("score") or reasoning.get("final_score") or 0)
+    ranking = score + int(ai.get("confidence", 0) or 0) + float(ai.get("risk_reward", 0) or 0) * 10
+    ranking += {"RETEST": 25, "BREAKOUT": 20, "MOMENTUM": 15, "PULLBACK": 10}.get(entry_mode, 5)
+    if ai.get("setup_quality") == "A+":
+        ranking += 20
+    elif ai.get("setup_quality") == "A":
+        ranking += 10
+    if intraday_info.get("approved"):
+        ranking += 15
+    if intraday_info.get("confirmations", 0) >= 3:
+        ranking += 10
+    ranking += priority_bonus(learning_context)
+    if setup.get("retest_confirmed"):
+        ranking += 10
+    flow = setup.get("options_flow") or options_flow
+    if flow:
+        bias = flow.get("bias") if isinstance(flow, dict) else getattr(flow, "bias", None)
+        flow_score = flow.get("score") if isinstance(flow, dict) else getattr(flow, "score", 0)
+        gamma = flow.get("gamma_squeeze") if isinstance(flow, dict) else getattr(flow, "gamma_squeeze", False)
+        if bias == "BULLISH" and setup.get("direction") == "CALL":
+            ranking += float(flow_score or 0) * 0.25
+        elif bias == "BEARISH" and setup.get("direction") == "PUT":
+            ranking += float(flow_score or 0) * 0.25
+        elif bias in {"BULLISH", "BEARISH"}:
+            ranking -= 15
+        if gamma and setup.get("direction") == "CALL":
+            ranking += 15
+    option_contract = setup.get("option_contract") or {}
+    recommendation_score = option_contract.get("recommendation_score") if isinstance(option_contract, dict) else getattr(option_contract, "recommendation_score", 0)
+    ranking += min(10, float(recommendation_score or 0) * 0.08)
+    return round(ranking, 2)
 
 
 class StockTechnicalAIBot(StockTechnicalBase):
@@ -442,6 +526,15 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         ai["learning_key"] = confidence_learning["learning_key"]
         ai["learning_stats"] = confidence_learning["learning_stats"]
 
+        try:
+            ml_row = build_ml_feature_row(tech=tech, setup=best, ai=ai, intraday_info=intraday_info)
+            adjusted_score, probability, model_info = adjust_score_with_logistic(ml_row, best.get("score", 0))
+            best["score"] = adjusted_score
+            best["ml_probability"] = probability
+            best["ml_model_info"] = model_info
+        except Exception as e:
+            print(f"{ticker}: intraday ML skipped: {e}")
+
         passes, gate_reason = self.ai_passes_gate(ai, best, intraday_info, entry_mode)
         if not passes:
             print(f"{ticker}: rejected - {gate_reason}")
@@ -515,6 +608,13 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             best["score"] = reasoning.get("final_score", best.get("score", 0))
         except Exception as e:
             print(f"{ticker}: options-aware reasoning refresh skipped: {e}")
+
+        success_block = success_rate_block_reason(best, best.get("ai_reasoning"))
+        if success_block:
+            print(f"{ticker}: rejected - {success_block}")
+            return None
+
+        ranking_score = intraday_ranking_score(best, ai, intraday_info, entry_mode, learning_context, options_flow)
 
         return {
             "ticker": ticker,
@@ -798,6 +898,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
                     "market_phase": (reasoning.get("market_phase") or {}).get("phase"),
                     "ensemble_score": reasoning.get("ensemble_score"),
                     "quality_rank": reasoning.get("quality_rank"),
+                    "ml_probability": setup.get("ml_probability"),
                     "win_probability": (reasoning.get("probabilities") or {}).get("win_probability"),
                     "trap_probability": (reasoning.get("probabilities") or {}).get("trap_probability"),
                     "no_trade_score": (reasoning.get("no_trade") or {}).get("score"),

@@ -49,6 +49,39 @@ class TelegramAlertTests(unittest.TestCase):
             "⭐ <b>AI Score:</b> ticker A_B &amp; setup",
         )
 
+    def test_send_telegram_splits_messages_that_exceed_telegram_limit(self):
+        long_message = "Header\n" + ("line of alert detail\n" * 220)
+
+        with patch.object(telegram_alert, "TOKEN", "token"), \
+            patch.object(telegram_alert, "CHAT_ID", "chat"), \
+            patch("telegram_alert.requests.post", return_value=Response(True)) as post:
+            sent = telegram_alert.send_telegram(long_message)
+
+        self.assertTrue(sent)
+        self.assertGreater(post.call_count, 1)
+        for call in post.call_args_list:
+            payload = call.kwargs["data"]
+            self.assertLessEqual(
+                len(payload["text"]),
+                telegram_alert.TELEGRAM_MESSAGE_LIMIT,
+            )
+
+    def test_send_telegram_returns_false_when_any_chunk_fails(self):
+        long_message = "Header\n" + ("line of alert detail\n" * 220)
+        responses = [
+            Response(True, 200, "OK"),
+            Response(False, 400, "message is too long"),
+            Response(False, 400, "message is too long"),
+        ]
+
+        with patch.object(telegram_alert, "TOKEN", "token"), \
+            patch.object(telegram_alert, "CHAT_ID", "chat"), \
+            patch("telegram_alert.requests.post", side_effect=responses) as post:
+            sent = telegram_alert.send_telegram(long_message)
+
+        self.assertFalse(sent)
+        self.assertEqual(post.call_count, 3)
+
     def test_send_telegram_returns_false_when_not_configured(self):
         with patch.object(telegram_alert, "TOKEN", ""), \
             patch.object(telegram_alert, "CHAT_ID", ""):

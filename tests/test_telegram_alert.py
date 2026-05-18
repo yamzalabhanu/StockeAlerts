@@ -66,6 +66,32 @@ class TelegramAlertTests(unittest.TestCase):
                 telegram_alert.TELEGRAM_MESSAGE_LIMIT,
             )
 
+    def test_send_telegram_splits_by_formatted_payload_length(self):
+        long_message = "Header\n" + ("A&B <risk> detail line\n" * 260)
+
+        with patch.object(telegram_alert, "TOKEN", "token"), \
+            patch.object(telegram_alert, "CHAT_ID", "chat"), \
+            patch("telegram_alert.requests.post", return_value=Response(True)) as post:
+            sent = telegram_alert.send_telegram(long_message)
+
+        self.assertTrue(sent)
+        self.assertGreater(post.call_count, 1)
+        for call in post.call_args_list:
+            payload = call.kwargs["data"]
+            self.assertLessEqual(
+                len(payload["text"]),
+                telegram_alert.TELEGRAM_MESSAGE_LIMIT,
+            )
+
+    def test_send_telegram_message_accepts_explicit_bot_credentials(self):
+        with patch("telegram_alert.requests.post", return_value=Response(True)) as post:
+            sent = telegram_alert.send_telegram_message(
+                "bot alert", "bot-token", "bot-chat"
+            )
+
+        self.assertTrue(sent)
+        self.assertEqual(post.call_args.kwargs["data"]["chat_id"], "bot-chat")
+
     def test_send_telegram_returns_false_when_any_chunk_fails(self):
         long_message = "Header\n" + ("line of alert detail\n" * 220)
         responses = [

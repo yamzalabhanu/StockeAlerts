@@ -65,6 +65,180 @@ def _market_context(bot=None) -> Dict[str, Any]:
     }
 
 
+def _as_mapping(value):
+    if isinstance(value, dict):
+        return value
+    return getattr(value, "__dict__", {}) or {}
+
+
+def _first_context_value(setup: Dict[str, Any], tech: Dict[str, Any], *names: str):
+    for name in names:
+        if name in setup and setup.get(name) not in (None, ""):
+            return setup.get(name)
+        if name in tech and tech.get(name) not in (None, ""):
+            return tech.get(name)
+    return None
+
+
+def _option_analysis(ticker: str, direction: str, setup: Dict[str, Any], tech: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert available options flow/contract data into adaptive reasoning inputs."""
+    flow = _as_mapping(setup.get("options_flow") or tech.get("options_flow"))
+    contract = _as_mapping(setup.get("option_contract") or tech.get("option_contract"))
+    reasons: list[str] = []
+    warnings: list[str] = []
+    score_adjustment = 0.0
+
+    direction = str(direction or "").upper()
+    expected_bias = "BULLISH" if direction == "CALL" else "BEARISH" if direction == "PUT" else None
+
+    if flow:
+        status = flow.get("status")
+        bias = flow.get("bias")
+        flow_score = _safe_float(flow.get("score"), 0)
+        if status and status != "OK":
+            warnings.append(f"Options flow unavailable ({status}: {flow.get('reason', 'no reason supplied')})")
+        elif expected_bias and bias == expected_bias:
+            adjustment = min(8, max(2, (flow_score - 50) * 0.12)) if flow_score >= 50 else 1
+            score_adjustment += adjustment
+            reasons.append(f"Options flow confirms {direction} bias: {bias} {flow_score:.0f}/100")
+        elif bias in {"BULLISH", "BEARISH"} and expected_bias and bias != expected_bias:
+            score_adjustment -= 10
+            warnings.append(f"Options flow conflicts with {direction}: {bias} {flow_score:.0f}/100")
+        elif flow_score:
+            warnings.append(f"Options flow is neutral/mixed at {flow_score:.0f}/100")
+
+        if flow.get("gamma_squeeze") and direction == "CALL":
+            score_adjustment += 4
+            reasons.append("Gamma-squeeze conditions support call continuation")
+        dealer_gamma = flow.get("dealer_gamma_state")
+        if dealer_gamma == "SHORT_GAMMA":
+            warnings.append("Short-gamma dealer state can amplify volatility; use tighter execution discipline")
+
+        signals = flow.get("signals") or []
+        if isinstance(signals, list) and signals:
+            signal_names = []
+            for signal in signals[:3]:
+                data = _as_mapping(signal)
+                if data.get("name"):
+                    signal_names.append(str(data.get("name")))
+            if signal_names:
+                reasons.append("Top options signals: " + ", ".join(signal_names))
+
+    if contract:
+        status = contract.get("status")
+        if status and status != "OK":
+            warnings.append(f"Option contract not order-ready ({status}: {contract.get('reason', 'no reason supplied')})")
+        elif not status or status == "OK":
+            spread = _safe_float(contract.get("spread_pct"), None)
+            volume = _safe_float(contract.get("volume"), 0)
+            oi = _safe_float(contract.get("open_interest"), 0)
+            rec_score = _safe_float(contract.get("recommendation_score"), 0)
+            delta = _safe_float(contract.get("delta"), None)
+            dte = _safe_float(contract.get("dte"), None)
+            iv = _safe_float(contract.get("implied_volatility"), None)
+            symbol = contract.get("contract_symbol") or f"{ticker} option"
+
+            if rec_score >= 70:
+                score_adjustment += min(5, rec_score * 0.04)
+                reasons.append(f"Recommended contract {symbol} has strong liquidity score {rec_score:.0f}/100")
+            elif rec_score:
+                warnings.append(f"Recommended contract liquidity score is only {rec_score:.0f}/100")
+
+            if spread is not None:
+                if spread <= 12:
+                    score_adjustment += 2
+                    reasons.append(f"Option spread is tradable at {spread:.1f}%")
+                else:
+                    score_adjustment -= 5
+                    warnings.append(f"Option spread is wide at {spread:.1f}%")
+
+            if volume >= 50 and oi >= 100:
+                reasons.append(f"Option liquidity supports execution: volume {volume:.0f}, OI {oi:.0f}")
+            elif volume or oi:
+                warnings.append(f"Option liquidity is thin: volume {volume:.0f}, OI {oi:.0f}")
+
+            if delta is not None:
+                abs_delta = abs(delta)
+                if 0.35 <= abs_delta <= 0.65:
+                    reasons.append(f"Delta {delta:.2f} gives directional exposure without extreme moneyness")
+                else:
+                    warnings.append(f"Delta {delta:.2f} is outside the preferred directional range")
+            if dte is not None:
+                if dte < 5:
+                    warnings.append(f"Only {dte:.0f} DTE remains; theta/gamma risk is elevated")
+                else:
+                    reasons.append(f"{dte:.0f} DTE leaves time for the thesis to work")
+            if iv is not None and iv > 1.2:
+                warnings.append(f"IV {iv:.2f} is elevated; avoid overpaying premium")
+
+    return {
+        "score_adjustment": round(score_adjustment, 2),
+        "reasons": reasons,
+        "warnings": warnings,
+        "flow": flow,
+        "contract": contract,
+    }
+
+
+def _technical_context(setup: Dict[str, Any], tech: Dict[str, Any], direction: str) -> Dict[str, Any]:
+    price = _first_context_value(setup, tech, "price", "entry")
+    ema_fast = _first_context_value(setup, tech, "ema9", "ema8")
+    ema_mid = _first_context_value(setup, tech, "ema21")
+    ema_slow = _first_context_value(setup, tech, "ema50")
+    vwap = _first_context_value(setup, tech, "vwap")
+    orb_high = _first_context_value(setup, tech, "orb_high")
+    orb_low = _first_context_value(setup, tech, "orb_low")
+    rel_volume = _first_context_value(setup, tech, "relative_volume", "rel_volume", "volume_ratio")
+    atr_extension = _first_context_value(setup, tech, "atr_extension", "breakout_distance_atr")
+
+    price_f = _safe_float(price, None)
+    fast_f = _safe_float(ema_fast, None)
+    mid_f = _safe_float(ema_mid, None)
+    slow_f = _safe_float(ema_slow, None)
+    vwap_f = _safe_float(vwap, None)
+    orb_high_f = _safe_float(orb_high, None)
+    orb_low_f = _safe_float(orb_low, None)
+
+    observations: list[str] = []
+    if price_f is not None and fast_f is not None and mid_f is not None:
+        if direction == "CALL" and price_f >= fast_f >= mid_f:
+            observations.append(f"price {price_f:.2f} is stacked above fast/mid EMAs ({fast_f:.2f}/{mid_f:.2f})")
+        elif direction == "PUT" and price_f <= fast_f <= mid_f:
+            observations.append(f"price {price_f:.2f} is stacked below fast/mid EMAs ({fast_f:.2f}/{mid_f:.2f})")
+        else:
+            observations.append(f"EMA stack is mixed around price {price_f:.2f} (fast {fast_f:.2f}, mid {mid_f:.2f})")
+    if slow_f is not None:
+        observations.append(f"EMA50 reference {slow_f:.2f}")
+    if price_f is not None and vwap_f is not None:
+        if direction == "CALL" and price_f >= vwap_f:
+            observations.append(f"price is holding above VWAP {vwap_f:.2f}")
+        elif direction == "PUT" and price_f <= vwap_f:
+            observations.append(f"price is holding below VWAP {vwap_f:.2f}")
+        else:
+            observations.append(f"price is on the wrong side of VWAP {vwap_f:.2f} for {direction}")
+    if price_f is not None and orb_high_f is not None and direction == "CALL":
+        observations.append(f"distance to ORB high {orb_high_f:.2f}: {price_f - orb_high_f:+.2f}")
+    if price_f is not None and orb_low_f is not None and direction == "PUT":
+        observations.append(f"distance to ORB low {orb_low_f:.2f}: {price_f - orb_low_f:+.2f}")
+    if rel_volume not in (None, ""):
+        observations.append(f"relative volume {rel_volume}x")
+    if atr_extension not in (None, ""):
+        observations.append(f"ATR extension {atr_extension}")
+
+    return {
+        "price": price_f,
+        "ema_fast": fast_f,
+        "ema_mid": mid_f,
+        "ema_slow": slow_f,
+        "vwap": vwap_f,
+        "orb_high": orb_high_f,
+        "orb_low": orb_low_f,
+        "relative_volume": rel_volume,
+        "atr_extension": atr_extension,
+        "observations": observations,
+    }
+
+
 def build_reasoning_report(
     ticker: str,
     setup: Dict[str, Any],
@@ -101,6 +275,9 @@ def build_reasoning_report(
         vision = score_chart_structure(tech, direction) or {}
     except Exception:
         vision = {}
+
+    technical_context = _technical_context(setup, tech, direction)
+    options_analysis = _option_analysis(ticker, direction, setup, tech)
 
     score = base_score
     early_session_setup = bool(setup.get("early_session_setup") or tech.get("early_session_setup")) and EARLY_SESSION_GRACE_ENABLED
@@ -253,6 +430,14 @@ def build_reasoning_report(
         score -= 10
         warnings.append(f"Risk/reward weak: {rr:.2f}R")
 
+    option_score_adjustment = _safe_float(options_analysis.get("score_adjustment"), 0)
+    if option_score_adjustment:
+        score += option_score_adjustment
+        target = reasons if option_score_adjustment > 0 else warnings
+        target.append(f"Options analysis adjusted score by {option_score_adjustment:+.1f}")
+    reasons.extend((options_analysis.get("reasons") or [])[:5])
+    warnings.extend((options_analysis.get("warnings") or [])[:5])
+
     learning_context = {
         "alert_type": trade_type,
         "entry_mode": setup.get("entry_mode", "SWING" if trade_type == "SWING" else "STANDARD"),
@@ -398,6 +583,8 @@ def build_reasoning_report(
         no_trade=no_trade,
         context_memory=context_memory,
         risk_plan=risk_plan,
+        technical_context=technical_context,
+        options_analysis=options_analysis,
     )
 
     return {
@@ -424,6 +611,8 @@ def build_reasoning_report(
         "probabilistic_penalties": probabilistic_profile,
         "context_memory": context_memory,
         "risk_plan": risk_plan,
+        "technical_context": technical_context,
+        "options_analysis": options_analysis,
         "reasons": reasons,
         "warnings": warnings,
         "reject_reasons": reject_reasons,
@@ -460,6 +649,8 @@ def _build_narrative(
     no_trade=None,
     context_memory=None,
     risk_plan=None,
+    technical_context=None,
+    options_analysis=None,
 ):
 
     regime = regime or {}
@@ -475,6 +666,28 @@ def _build_narrative(
     no_trade = no_trade or {}
     context_memory = context_memory or {}
     risk_plan = risk_plan or {}
+    technical_context = technical_context or {}
+    options_analysis = options_analysis or {}
+
+    tech_observations = technical_context.get("observations") or []
+    options_reasons = options_analysis.get("reasons") or []
+    options_warnings = options_analysis.get("warnings") or []
+    option_flow = options_analysis.get("flow") or {}
+    option_contract = options_analysis.get("contract") or {}
+
+    take_trade_parts = []
+    if mtf.get("structure") in {"STRONG_ALIGNMENT", "GOOD_ALIGNMENT"}:
+        take_trade_parts.append("timeframes are aligned")
+    if vision.get("quality") in {"ELITE", "GOOD"}:
+        take_trade_parts.append(f"chart structure is {vision.get('quality')}")
+    if execution.get("quality") == "GOOD":
+        take_trade_parts.append("execution quality is clean")
+    if options_reasons:
+        take_trade_parts.append("options data confirms tradability")
+    if probabilities.get("win_probability"):
+        take_trade_parts.append(f"modeled win probability is {probabilities.get('win_probability', 0) * 100:.0f}%")
+    if not take_trade_parts:
+        take_trade_parts.append("the setup is still being validated against chart, technical, and options inputs")
 
     lines = [
         f"AI Reasoning: {trade_type} {direction} {ticker} classified as {decision} with composite score {final_score}/100.",
@@ -484,7 +697,30 @@ def _build_narrative(
         f"Execution quality: {execution.get('quality', 'UNKNOWN')} | Setup filter: {setup_quality.get('status', 'UNKNOWN')} | Chart structure: {vision.get('quality', 'UNKNOWN')}.",
         f"Weighted ensemble: {ensemble_score if ensemble_score is not None else 'n/a'} with components {component_scores}; rank {quality_rank or 'n/a'}; probabilistic tier {probabilistic_tier or 'n/a'}.",
         f"Probabilities: win {probabilities.get('win_probability', 0):.2f}, continuation {probabilities.get('trend_continuation_probability', 0):.2f}, reversal {probabilities.get('reversal_probability', 0):.2f}, trap {probabilities.get('trap_probability', 0):.2f}.",
+        "Take-trade thesis: " + "; ".join(take_trade_parts) + ".",
     ]
+
+    if tech_observations:
+        lines.append("Ticker-adaptive technical read: " + "; ".join(tech_observations[:7]) + ".")
+
+    if option_flow or option_contract:
+        flow_summary = (
+            f"flow {option_flow.get('bias', 'n/a')} {option_flow.get('score', 'n/a')}/100, "
+            f"gamma {option_flow.get('dealer_gamma_state', 'n/a')}, squeeze {option_flow.get('gamma_squeeze', 'n/a')}"
+        ) if option_flow else "flow n/a"
+        contract_summary = (
+            f"contract {option_contract.get('contract_symbol', 'n/a')} spread {option_contract.get('spread_pct', 'n/a')}%, "
+            f"vol/OI {option_contract.get('volume', 'n/a')}/{option_contract.get('open_interest', 'n/a')}, "
+            f"delta {option_contract.get('delta', 'n/a')}, DTE {option_contract.get('dte', 'n/a')}"
+        ) if option_contract else "contract n/a"
+        lines.append(
+            f"Options analysis: adjustment {options_analysis.get('score_adjustment', 0):+.1f}; "
+            f"{flow_summary}; {contract_summary}."
+        )
+        if options_reasons:
+            lines.append("Options confirmation: " + "; ".join(options_reasons[:4]) + ".")
+        if options_warnings:
+            lines.append("Options cautions: " + "; ".join(options_warnings[:4]) + ".")
 
     if learning_stats:
         lines.append(

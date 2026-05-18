@@ -562,6 +562,25 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
             "reason": f"Option contract selection failed: {e}",
         }
 
+    try:
+        reasoning_input = dict(setup)
+        previous_reasoning = setup.get("ai_reasoning") or {}
+        if previous_reasoning.get("base_score") is not None:
+            reasoning_input["score"] = previous_reasoning.get("base_score")
+        refreshed_reasoning = build_reasoning_report(
+            ticker=ticker,
+            setup=reasoning_input,
+            tech=tech,
+            bot=bot,
+            trade_type="SWING",
+        ) or {}
+        if isinstance(refreshed_reasoning, dict):
+            setup["ai_reasoning"] = refreshed_reasoning
+            setup["score"] = refreshed_reasoning.get("final_score", setup.get("score", 0))
+            setup["decision"] = refreshed_reasoning.get("decision", setup.get("decision", setup.get("tier", "WATCH")))
+    except Exception as e:
+        print(f"{ticker}: options-aware swing reasoning refresh skipped: {e}")
+
     setup["ranking_score"] = swing_ranking_score(setup)
 
     if not send_alert:

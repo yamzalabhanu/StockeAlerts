@@ -48,6 +48,15 @@ ENABLE_SWING_ALERTS = True
 ENABLE_OUTCOME_TRACKING = os.getenv("ENABLE_OUTCOME_TRACKING", "true").lower() == "true"
 OUTCOME_TRACKING_SKIP_UNAUTHORIZED = os.getenv("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", "true").lower() == "true"
 
+# --- SUCCESS RATE / VALIDATION MODE ---
+SUCCESS_RATE_MODE = os.getenv("SUCCESS_RATE_MODE", "false").lower() == "true"
+SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY = float(os.getenv("SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY", "0.68"))
+
+# Option outcome tracking marks the selected contract independently from the
+# underlying stock path so calibration can learn whether the actual option paid.
+OPTION_OUTCOME_TARGET_PCT = float(os.getenv("OPTION_OUTCOME_TARGET_PCT", "50"))
+OPTION_OUTCOME_STOP_PCT = float(os.getenv("OPTION_OUTCOME_STOP_PCT", "35"))
+
 INTRADAY_MIN_SCORE = 95
 
 # High-quality intraday setups can pass with non-blocking WARNING states

@@ -18,6 +18,35 @@ LEGACY_OUTCOME_FIELDS = [
     "ai_confidence",
     "calibrated_confidence",
     "score",
+    "ml_probability",
+    "win_probability",
+    "expected_move_pct",
+    "result",
+    "target_hit",
+    "stop_hit",
+    "target_time",
+    "stop_time",
+    "max_gain_pct",
+    "max_loss_pct",
+    "forecast_accuracy_pct",
+]
+
+HISTORICAL_OUTCOME_FIELDS = [
+    "timestamp",
+    "ticker",
+    "direction",
+    "entry",
+    "stop",
+    "target",
+    "alert_type",
+    "entry_mode",
+    "setup_key",
+    "market_regime",
+    "mtf_structure",
+    "chart_structure",
+    "ai_confidence",
+    "calibrated_confidence",
+    "score",
     "expected_move_pct",
     "result",
     "target_hit",
@@ -41,6 +70,15 @@ OUTCOME_ENRICHMENT_FIELDS = [
     "spread_pct",
     "option_volume",
     "open_interest",
+    "option_contract_symbol",
+    "option_entry_price",
+    "option_target_price",
+    "option_stop_price",
+    "option_target_hit",
+    "option_stop_hit",
+    "option_result",
+    "option_max_gain_pct",
+    "option_max_loss_pct",
     "sector_relative_strength",
     "deep_ai_approval",
     "deep_ai_rejection_reason",
@@ -77,6 +115,11 @@ def _row_from_values(header: List[str], values: List[str]) -> Dict[str, Any]:
     if len(values) == len(LEGACY_OUTCOME_FIELDS):
         row = _blank_outcome()
         row.update(dict(zip(LEGACY_OUTCOME_FIELDS, values)))
+        return row
+
+    if len(values) == len(HISTORICAL_OUTCOME_FIELDS):
+        row = _blank_outcome()
+        row.update(dict(zip(HISTORICAL_OUTCOME_FIELDS, values)))
         return row
 
     row = _blank_outcome()

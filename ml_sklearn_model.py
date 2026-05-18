@@ -45,6 +45,17 @@ def _pct(a, b):
     return ((a - b) / b) * 100.0
 
 
+def _first_present(*mappings_and_keys, default=None):
+    for mapping, keys in mappings_and_keys:
+        if not isinstance(mapping, dict):
+            continue
+        for key in keys:
+            value = mapping.get(key)
+            if value not in (None, ""):
+                return value
+    return default
+
+
 def _label_from_row(row: Dict) -> int | None:
     result = str(row.get("result", row.get("outcome", ""))).strip().upper()
     positive = {"WIN", "TARGET", "TP", "TP1", "TP2", "PROFIT", "SUCCESS", "1", "TRUE"}
@@ -56,20 +67,51 @@ def _label_from_row(row: Dict) -> int | None:
     return None
 
 
-def features_from_row(row: Dict) -> Dict[str, float]:
-    price = row.get("price") or row.get("entry")
+def build_ml_feature_row(tech: Dict | None = None, setup: Dict | None = None, ai: Dict | None = None, intraday_info: Dict | None = None) -> Dict[str, float]:
+    """Build the canonical logistic-model feature row for any alert path.
+
+    Both intraday and swing scanners pass through this adapter so model training,
+    live inference, and replay use the same feature names and fallbacks.
+    """
+    tech = tech or {}
+    setup = setup or {}
+    ai = ai or {}
+    intraday_info = intraday_info or {}
+
+    price = _first_present((ai, ("entry", "price")), (setup, ("entry", "price")), (tech, ("price", "entry")), default=0.0)
+    score = _first_present((setup, ("score", "rule_score")), (ai, ("score",)), (tech, ("score",)), default=0.0)
+    risk_reward = _first_present((ai, ("risk_reward",)), (setup, ("risk_reward",)), (tech, ("risk_reward",)), default=0.0)
+    confidence = _first_present(
+        (ai, ("confidence", "base_confidence", "ai_confidence")),
+        (setup, ("calibrated_confidence", "confidence", "ai_confidence", "ml_probability")),
+        (tech, ("ai_confidence", "confidence")),
+        default=0.0,
+    )
+    confirmations = _first_present(
+        (intraday_info, ("confirmations", "intraday_confirmations")),
+        (setup, ("intraday_confirmations", "confirmations")),
+        (tech, ("intraday_confirmations", "confirmations")),
+        default=0.0,
+    )
+
     return {
-        "score": _safe_float(row.get("score")),
-        "risk_reward": _safe_float(row.get("risk_reward")),
-        "ai_confidence": _safe_float(row.get("ai_confidence", row.get("confidence"))),
-        "intraday_confirmations": _safe_float(row.get("intraday_confirmations", row.get("confirmations"))),
-        "current_volume": _safe_float(row.get("current_volume")),
-        "avg_20_volume": _safe_float(row.get("avg_20_volume")),
-        "price_vs_vwap_pct": _pct(price, row.get("vwap")),
-        "price_vs_ema21_pct": _pct(price, row.get("ema21")),
-        "trend_5m_num": _trend_to_num(row.get("trend_5m")),
-        "trend_15m_num": _trend_to_num(row.get("trend_15m")),
+        "score": _safe_float(score),
+        "risk_reward": _safe_float(risk_reward),
+        "ai_confidence": _safe_float(confidence),
+        "intraday_confirmations": _safe_float(confirmations),
+        "current_volume": _safe_float(_first_present((tech, ("current_volume", "volume")), (setup, ("current_volume",)), default=0.0)),
+        "avg_20_volume": _safe_float(_first_present((tech, ("avg_20_volume", "average_volume")), (setup, ("avg_20_volume",)), default=0.0)),
+        "price_vs_vwap_pct": _safe_float(_first_present((tech, ("price_vs_vwap_pct", "distance_from_vwap")), (setup, ("price_vs_vwap_pct", "distance_from_vwap")), default=_pct(price, tech.get("vwap")))),
+        "price_vs_ema21_pct": _safe_float(_first_present((tech, ("price_vs_ema21_pct", "distance_from_ema21")), (setup, ("price_vs_ema21_pct", "distance_from_ema21")), default=_pct(price, tech.get("ema21")))),
+        "trend_5m_num": _trend_to_num(_first_present((tech, ("trend_5m",)), (setup, ("trend_5m",)), default="")),
+        "trend_15m_num": _trend_to_num(_first_present((tech, ("trend_15m",)), (setup, ("trend_15m",)), default="")),
     }
+
+
+def features_from_row(row: Dict) -> Dict[str, float]:
+    # Backward-compatible CSV training adapter.  Outcome rows and legacy alert logs
+    # are single flat dicts, so let build_ml_feature_row read from the same mapping.
+    return build_ml_feature_row(row, row, row, row)
 
 
 def _import_sklearn():

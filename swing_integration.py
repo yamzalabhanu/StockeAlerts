@@ -8,6 +8,8 @@ from bot_utils import safe_float
 from config import (
     ENABLE_SWING_ALERTS,
     LOG_FILE,
+    SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY,
+    SUCCESS_RATE_MODE,
     SWING_ALERT_COOLDOWN_SEC,
     SWING_HOLD_DAYS_MAX,
 )
@@ -24,8 +26,51 @@ from option_order_manager import (
     maybe_buy_recommended_option,
 )
 from alert_history import mark_alerted_today, was_alerted_today
+from ml_sklearn_model import adjust_score_with_logistic, build_ml_feature_row
 
 SWING_ALERT_CACHE = {}
+
+
+def _option_contract_has_stale_fallback(option_contract):
+    if not isinstance(option_contract, dict):
+        option_contract = getattr(option_contract, "__dict__", {}) if option_contract else {}
+    reason = str(option_contract.get("reason") or "").lower()
+    return "stale" in reason and "fallback" in reason
+
+
+def _success_rate_block_reason(setup, reasoning=None):
+    if not SUCCESS_RATE_MODE:
+        return ""
+    setup = setup or {}
+    reasoning = reasoning or setup.get("ai_reasoning") or {}
+    risk_action = str(((reasoning.get("risk_plan") or {}).get("action")) or setup.get("risk_action") or "").upper()
+    decision = str(reasoning.get("decision") or setup.get("decision") or setup.get("tier") or "").upper()
+    quality_rank = str(reasoning.get("quality_rank") or setup.get("quality_rank") or "").upper()
+    probabilities = reasoning.get("probabilities") or {}
+    calibrated_probability = probabilities.get("win_probability")
+    if calibrated_probability in (None, ""):
+        calibrated_probability = setup.get("ml_probability")
+    if calibrated_probability in (None, ""):
+        calibrated_probability = setup.get("calibrated_confidence")
+        try:
+            calibrated_probability = float(calibrated_probability) / 100.0
+        except Exception:
+            calibrated_probability = None
+    if risk_action == "WATCH_ONLY":
+        return "SUCCESS_RATE_MODE blocked WATCH_ONLY risk plan"
+    if decision == "NO_TRADE" or quality_rank == "NO_TRADE" or (reasoning.get("no_trade") or {}).get("is_no_trade"):
+        return "SUCCESS_RATE_MODE blocked NO_TRADE setup"
+    if _option_contract_has_stale_fallback(setup.get("option_contract")):
+        return "SUCCESS_RATE_MODE blocked stale fallback option contract"
+    try:
+        if calibrated_probability is not None and float(calibrated_probability) < SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY:
+            return (
+                "SUCCESS_RATE_MODE blocked low calibrated probability "
+                f"{float(calibrated_probability):.2f} < {SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY:.2f}"
+            )
+    except Exception:
+        return "SUCCESS_RATE_MODE blocked unreadable calibrated probability"
+    return ""
 
 
 SWING_MIN_BENCHMARK_RR = 1.8
@@ -403,6 +448,8 @@ def send_prepared_swing_candidate(bot, ticker, setup, tech, alert_time=None):
                 "ai_confidence": setup.get("score"),
                 "calibrated_confidence": setup.get("calibrated_confidence"),
                 "score": setup.get("score"),
+                "ml_probability": setup.get("ml_probability"),
+                "win_probability": (reasoning.get("probabilities") or {}).get("win_probability"),
                 "tech": tech,
                 "setup": setup,
                 "reasoning": reasoning,
@@ -494,10 +541,9 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
         setup["ai_reasoning"] = {}
 
     try:
-        from ml_sklearn_model import adjust_score_with_logistic
-
+        ml_row = build_ml_feature_row(tech=tech, setup=setup, ai=setup, intraday_info={})
         adjusted, prob, model_info = adjust_score_with_logistic(
-            tech,
+            ml_row,
             setup.get("score", 0),
         )
 
@@ -580,6 +626,11 @@ def process_swing_candidate(bot, ticker, tech, send_alert=True):
             setup["decision"] = refreshed_reasoning.get("decision", setup.get("decision", setup.get("tier", "WATCH")))
     except Exception as e:
         print(f"{ticker}: options-aware swing reasoning refresh skipped: {e}")
+
+    success_block = _success_rate_block_reason(setup, setup.get("ai_reasoning"))
+    if success_block:
+        print(f"{ticker}: swing rejected - {success_block}")
+        return None
 
     setup["ranking_score"] = swing_ranking_score(setup)
 

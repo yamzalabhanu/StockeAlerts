@@ -401,9 +401,13 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         print(f"{ticker}: entry_mode={entry_mode} - {mode_reason}")
 
         try:
+            reasoning_input = dict(best)
+            previous_reasoning = best.get("ai_reasoning") or {}
+            if previous_reasoning.get("base_score") is not None:
+                reasoning_input["score"] = previous_reasoning.get("base_score")
             reasoning = build_reasoning_report(
                 ticker=ticker,
-                setup=best,
+                setup=reasoning_input,
                 tech=tech,
                 bot=self,
                 trade_type="INTRADAY",
@@ -494,6 +498,23 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
         except Exception as e:
             print(f"{ticker}: rejected - option contract selection failed: {e}")
             return None
+
+        try:
+            reasoning_input = dict(best)
+            previous_reasoning = best.get("ai_reasoning") or {}
+            if previous_reasoning.get("base_score") is not None:
+                reasoning_input["score"] = previous_reasoning.get("base_score")
+            reasoning = build_reasoning_report(
+                ticker=ticker,
+                setup=reasoning_input,
+                tech=tech,
+                bot=self,
+                trade_type="INTRADAY",
+            ) or {}
+            best["ai_reasoning"] = reasoning
+            best["score"] = reasoning.get("final_score", best.get("score", 0))
+        except Exception as e:
+            print(f"{ticker}: options-aware reasoning refresh skipped: {e}")
 
         return {
             "ticker": ticker,
@@ -652,6 +673,7 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             f"🔥 *Retest:* {ai['retest_confirmed']}\n"
             f"⚠️ *Late Risk:* {ai['late_breakout_risk']}\n\n"
             f"📝 *AI Reason:* {ai['reason']}\n\n"
+            f"🧠 *Dynamic Trade Thesis:*\n{(setup.get('ai_reasoning') or {}).get('narrative', 'n/a')}\n\n"
             f"🔎 *Rule Reasons:* {', '.join(setup.get('reasons', []))}\n"
             f"🌎 *ETF Details:* {', '.join(market['details'])}"
         )

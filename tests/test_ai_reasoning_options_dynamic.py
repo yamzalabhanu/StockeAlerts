@@ -97,6 +97,37 @@ class DynamicOptionsReasoningTests(unittest.TestCase):
         self.assertIn("One-sentence summary", narrative)
         self.assertIn("Detailed model diagnostics", narrative)
 
+    def test_reasoning_can_hide_detailed_model_diagnostics(self):
+        setup = {
+            "direction": "CALL",
+            "score": 91,
+            "risk_reward": 2.0,
+            "options_flow": {"status": "OK", "bias": "BULLISH", "score": 80},
+            "option_contract": {
+                "status": "OK",
+                "spread_pct": 5,
+                "volume": 500,
+                "open_interest": 1000,
+                "recommendation_score": 82,
+            },
+        }
+
+        with patch("ai_reasoning_engine.TELEGRAM_DETAILED_MODEL_DIAGNOSTICS", False), \
+            patch("ai_reasoning_engine.detect_market_regime", return_value={"regime": "TRENDING_BULL", "confidence": 80}), \
+            patch("ai_reasoning_engine.analyze_multi_timeframe_structure", return_value={"structure": "GOOD_ALIGNMENT", "aligned_timeframes": 2}), \
+            patch("ai_reasoning_engine.evaluate_execution_quality", return_value={"quality": "GOOD", "strengths": []}), \
+            patch("ai_reasoning_engine.evaluate_setup_quality", return_value={"status": "PASS", "reasons": []}), \
+            patch("ai_reasoning_engine.score_chart_structure", return_value={"quality": "GOOD", "warnings": []}), \
+            patch("ai_reasoning_engine.score_adjustment", return_value=0), \
+            patch("ai_reasoning_engine.priority_bonus", return_value=0):
+            report = build_reasoning_report("QUIET", setup, {}, bot=None, trade_type="INTRADAY")
+
+        narrative = report["narrative"]
+        self.assertIn("Best human-readable conclusion", narrative)
+        self.assertIn("One-sentence summary", narrative)
+        self.assertNotIn("Detailed model diagnostics", narrative)
+        self.assertNotIn("AI Reasoning:", narrative)
+
     def test_options_conflict_adds_warning_and_negative_adjustment(self):
         setup = {
             "direction": "CALL",

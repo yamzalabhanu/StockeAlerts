@@ -741,6 +741,8 @@ This helps reduce fake breakouts, countertrend trades, and low-quality swing ent
 
 Alert messages are HTML-safe by default. The bot escapes dynamic text, preserves simple bold labels, and falls back to plain text when Telegram rejects formatted content. This is designed to keep alerts deliverable even when tickers, setup keys, URLs, or AI explanations contain characters that would otherwise break Markdown parsing.
 
+Detailed model diagnostics are included in AI alert narratives by default for transparency. Set `TELEGRAM_DETAILED_MODEL_DIAGNOSTICS=false` to keep Telegram alerts shorter by sending only the human-readable conclusion and one-sentence summary.
+
 ## Intraday Alert Contents
 
 Intraday alerts can include:
@@ -1049,6 +1051,7 @@ MIN_AUTO_OPTION_OPEN_INTEREST=5000
 
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
+TELEGRAM_DETAILED_MODEL_DIAGNOSTICS=true  # Set false to send only the human-readable AI summary in Telegram alerts
 ALPACA_API_KEY=
 ALPACA_SECRET_KEY=
 PAPER_TRADING=true

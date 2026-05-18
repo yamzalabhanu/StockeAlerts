@@ -48,6 +48,11 @@ ENABLE_SWING_ALERTS = True
 ENABLE_OUTCOME_TRACKING = os.getenv("ENABLE_OUTCOME_TRACKING", "true").lower() == "true"
 OUTCOME_TRACKING_SKIP_UNAUTHORIZED = os.getenv("OUTCOME_TRACKING_SKIP_UNAUTHORIZED", "true").lower() == "true"
 
+# Keep verbose model diagnostics in Telegram alert narratives by default for
+# transparency, but allow quieter production alerts when only the human summary
+# is desired.
+TELEGRAM_DETAILED_MODEL_DIAGNOSTICS = os.getenv("TELEGRAM_DETAILED_MODEL_DIAGNOSTICS", "true").lower() == "true"
+
 # --- SUCCESS RATE / VALIDATION MODE ---
 SUCCESS_RATE_MODE = os.getenv("SUCCESS_RATE_MODE", "false").lower() == "true"
 SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY = float(os.getenv("SUCCESS_RATE_MIN_CALIBRATED_PROBABILITY", "0.68"))

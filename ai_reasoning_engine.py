@@ -32,6 +32,7 @@ from config import (
     MIN_SCORE,
     ACCOUNT_SIZE,
     RISK_PER_TRADE_PCT,
+    TELEGRAM_DETAILED_MODEL_DIAGNOSTICS,
 )
 
 
@@ -948,6 +949,9 @@ def _build_narrative(
         risk_plan=risk_plan,
         no_trade=no_trade,
     )
+
+    if not TELEGRAM_DETAILED_MODEL_DIAGNOSTICS:
+        return human_summary
 
     return human_summary + "\n\nDetailed model diagnostics\n\n" + "\n".join(lines)
 

@@ -1,9 +1,7 @@
 from config import *
 from openai import OpenAI
 
-import requests
-
-from telegram_formatting import html_payload
+from telegram_alert import send_telegram_message
 import asyncio
 import datetime as dt
 import csv
@@ -160,29 +158,7 @@ class StockTechnicalAIBot(StockTechnicalBase):
             print(msg)
             return False
 
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        formatted_payload = html_payload(TELEGRAM_CHAT_ID, msg)
-        plain_payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg}
-
-        try:
-            response = requests.post(url, data=formatted_payload, timeout=10)
-            if response.ok:
-                return True
-
-            print(f"Telegram formatted send failed ({response.status_code}): {response.text}")
-            fallback_response = requests.post(url, data=plain_payload, timeout=10)
-            if fallback_response.ok:
-                print("Telegram alert sent without formatting")
-                return True
-
-            print(
-                "Telegram plain-text send failed "
-                f"({fallback_response.status_code}): {fallback_response.text}"
-            )
-            return False
-        except requests.RequestException as e:
-            print(f"Telegram error: {e}")
-            return False
+        return send_telegram_message(msg, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
     def encode_image(self, path):
         with open(path, "rb") as f:

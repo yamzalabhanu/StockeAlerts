@@ -51,7 +51,7 @@ OUTCOME_TRACKING_SKIP_UNAUTHORIZED = os.getenv("OUTCOME_TRACKING_SKIP_UNAUTHORIZ
 # Keep verbose model diagnostics in Telegram alert narratives by default for
 # transparency, but allow quieter production alerts when only the human summary
 # is desired.
-TELEGRAM_DETAILED_MODEL_DIAGNOSTICS = os.getenv("TELEGRAM_DETAILED_MODEL_DIAGNOSTICS", "true").lower() == "true"
+TELEGRAM_DETAILED_MODEL_DIAGNOSTICS = os.getenv("TELEGRAM_DETAILED_MODEL_DIAGNOSTICS", "false").lower() == "true"
 
 # --- SUCCESS RATE / VALIDATION MODE ---
 SUCCESS_RATE_MODE = os.getenv("SUCCESS_RATE_MODE", "false").lower() == "true"

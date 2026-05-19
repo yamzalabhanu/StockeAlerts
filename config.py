@@ -276,7 +276,7 @@ BASE_WATCHLIST = list(dict.fromkeys(CORE_WATCHLIST))
 # StockTechnicalBase.get_auto_watchlist() merges Polygon movers with BASE_WATCHLIST.
 # Leave AUTO_WATCHLIST_DATE empty for the live snapshot, or set YYYY-MM-DD to scan
 # tickers that were active on that historical trading day.
-USE_AUTO_WATCHLIST = True
+USE_AUTO_WATCHLIST = os.getenv("USE_AUTO_WATCHLIST", "false").lower() == "true"
 AUTO_WATCHLIST_DATE = os.getenv("AUTO_WATCHLIST_DATE", "").strip()
 AUTO_WATCHLIST_LIMIT = int(os.getenv("AUTO_WATCHLIST_LIMIT", "25"))
 AUTO_WATCHLIST_MIN_SCORE = float(os.getenv("AUTO_WATCHLIST_MIN_SCORE", "70"))

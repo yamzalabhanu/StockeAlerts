@@ -303,7 +303,7 @@ Key controls include:
 
 | Setting | Purpose |
 |---|---|
-| `USE_AUTO_WATCHLIST` | Enable/disable automatic mover discovery |
+| `USE_AUTO_WATCHLIST` | Enable/disable automatic mover discovery (default: `false`) |
 | `AUTO_WATCHLIST_LIMIT` | Maximum number of mover symbols to append |
 | `MIN_AUTO_VOLUME` | Minimum same-day stock volume for daily-mover qualification |
 | `MIN_AUTO_CHANGE_PCT` | Minimum absolute regular-session percentage move |

@@ -1,6 +1,9 @@
 import datetime as dt
+import json
 import unittest
 from unittest.mock import patch
+
+import requests
 
 import bot_technical
 from config import MARKET_TZ
@@ -94,6 +97,40 @@ class RealtimePriceRefreshTests(unittest.TestCase):
             self.assertNotIn("apiKey=", message)
         finally:
             bot_technical._realtime_stock_lookup_disabled_reason = None
+
+
+    def test_polygon_json_retries_timeout_then_succeeds(self):
+        bot = StockTechnicalBase(["SPY"])
+
+        timeout = requests.exceptions.Timeout("timed out")
+        response = unittest.mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"ok": True}
+
+        with patch("bot_technical.requests.get", side_effect=[timeout, response]) as get, patch(
+            "bot_technical.time.sleep"
+        ) as sleeper:
+            payload = bot._request_polygon_json("https://api.polygon.io/test", params={})
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(get.call_count, 2)
+        sleeper.assert_called_once()
+
+    def test_polygon_json_raises_after_json_decode_retries(self):
+        bot = StockTechnicalBase(["SPY"])
+
+        response = unittest.mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.side_effect = json.JSONDecodeError("bad json", "{}", 1)
+
+        with patch("bot_technical.requests.get", return_value=response) as get, patch(
+            "bot_technical.time.sleep"
+        ) as sleeper:
+            with self.assertRaises(json.JSONDecodeError):
+                bot._request_polygon_json("https://api.polygon.io/test", params={})
+
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(sleeper.call_count, 2)
 
     def test_realtime_trade_non_auth_error_redacts_api_key_but_does_not_disable(self):
         bot = StockTechnicalBase(["SPY"])

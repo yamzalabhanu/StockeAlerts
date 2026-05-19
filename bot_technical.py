@@ -2,6 +2,7 @@ from config import *
 from polygon import RESTClient
 
 import datetime as dt
+import json
 import time
 import re
 import requests
@@ -98,9 +99,22 @@ class StockTechnicalBase:
         if "apiKey" not in params and "apiKey=" not in url:
             params["apiKey"] = POLYGON_API_KEY
 
-        r = requests.get(url, params=params, timeout=20)
-        r.raise_for_status()
-        return r.json()
+        last_error = None
+        for attempt in range(3):
+            try:
+                r = requests.get(url, params=params, timeout=20)
+                r.raise_for_status()
+                return r.json()
+            except (requests.exceptions.Timeout, json.JSONDecodeError) as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(0.35 * (attempt + 1))
+                    continue
+                break
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Unexpected Polygon request failure")
 
     def _previous_trading_day(self, day: dt.date) -> dt.date:
         previous = day - dt.timedelta(days=1)

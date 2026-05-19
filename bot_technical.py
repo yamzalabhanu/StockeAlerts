@@ -389,6 +389,55 @@ class StockTechnicalBase:
         auto = [x["ticker"] for x in movers[:AUTO_WATCHLIST_LIMIT]]
         return self._merge_auto_watchlist(auto, label)
 
+    def _build_snapshot_candidate(
+        self, item: Dict[str, Any], day: dt.date
+    ) -> Optional[Dict[str, Any]]:
+        ticker = item.get("ticker")
+        if not ticker:
+            return None
+
+        day_data = item.get("day", {}) or {}
+        last_trade = item.get("lastTrade", {}) or {}
+        prev_day = item.get("prevDay", {}) or {}
+
+        price = safe_float(last_trade.get("p"))
+        if price < MIN_STOCK_PRICE:
+            return None
+
+        return {
+            "ticker": ticker,
+            "day": day,
+            "price": price,
+            "prev_close": safe_float(prev_day.get("c")),
+            "daily_volume": safe_float(day_data.get("v")),
+            "daily_change_pct": abs(safe_float(item.get("todaysChangePerc"))),
+        }
+
+    def _get_session_mover_candidates(self, day: dt.date) -> List[Dict[str, Any]]:
+        endpoints = (
+            "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers",
+            "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers",
+        )
+        candidates: Dict[str, Dict[str, Any]] = {}
+
+        for url in endpoints:
+            data = self._request_polygon_json(url)
+            for item in data.get("tickers", [])[:AUTO_WATCHLIST_SESSION_MOVER_LIMIT]:
+                candidate = self._build_snapshot_candidate(item, day)
+                if candidate:
+                    candidates[candidate["ticker"]] = candidate
+
+        ranked = list(candidates.values())
+        ranked.sort(
+            key=lambda x: (
+                safe_float(x.get("daily_change_pct")),
+                safe_float(x.get("daily_volume")),
+                safe_float(x.get("price")),
+            ),
+            reverse=True,
+        )
+        return ranked
+
     def get_active_tickers_for_day(self, day: Union[str, dt.date, dt.datetime]) -> set:
         parsed_day = self._parse_watchlist_day(day)
         if parsed_day is None:
@@ -480,37 +529,24 @@ class StockTechnicalBase:
                 print(f"Historical auto-watchlist error for {parsed_day}: {e}")
                 return self.base_tickers
 
-        url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
-
         try:
-            data = self._request_polygon_json(url)
             today = dt.datetime.now(MARKET_TZ).date()
             candidates = []
 
-            for item in data.get("tickers", []):
-                ticker = item.get("ticker")
-                day = item.get("day", {})
-                last_trade = item.get("lastTrade", {})
-                prev_day = item.get("prevDay", {}) or {}
+            if AUTO_WATCHLIST_USE_SESSION_MOVERS:
+                try:
+                    candidates = self._get_session_mover_candidates(today)
+                except Exception as e:
+                    print(f"Session movers watchlist fetch failed: {e}")
 
-                change_pct = abs(safe_float(item.get("todaysChangePerc")))
-                volume = safe_float(day.get("v"))
-                price = safe_float(last_trade.get("p"))
-
-                if price < MIN_STOCK_PRICE:
-                    continue
-
-                if ticker:
-                    candidates.append(
-                        {
-                            "ticker": ticker,
-                            "day": today,
-                            "price": price,
-                            "prev_close": safe_float(prev_day.get("c")),
-                            "daily_volume": volume,
-                            "daily_change_pct": change_pct,
-                        }
-                    )
+            if not candidates:
+                data = self._request_polygon_json(
+                    "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers"
+                )
+                for item in data.get("tickers", []):
+                    candidate = self._build_snapshot_candidate(item, today)
+                    if candidate:
+                        candidates.append(candidate)
 
             candidates.sort(
                 key=lambda x: (

@@ -75,8 +75,8 @@ def _success_rate_block_reason(setup, reasoning=None):
 
 SWING_MIN_BENCHMARK_RR = 1.8
 SWING_ALLOWED_DECISIONS = {"A+", "A"}
-SWING_MIN_COMPOSITE_SCORE = 88
-SWING_DIRECTION_REGIMES = {"CALL": "", "PUT": "", "CALL": "TRENDING_BULL", "PUT": "TRENDING_BEAR"}
+SWING_MIN_COMPOSITE_SCORE = 92
+SWING_ALLOWED_REGIMES = {"TRENDING_BULL", "TRENDING_BEAR", "MIXED"}
 SWING_ALLOWED_EXECUTION = {EXECUTION_GOOD, EXECUTION_WARNING}
 SWING_ALLOWED_SETUP_FILTERS = {PASS, WARNING, REJECT}
 SWING_ALLOWED_CHART_STRUCTURES = {"ELITE", "GOOD"}
@@ -103,19 +103,9 @@ def _blocking_ai_reject_reasons(reasoning):
     ]
 
 
-def _regime_matches_swing_direction(regime, required_regime, decision, composite_score):
-    """Return True when regime confirmation is strong enough for benchmark swings."""
-    if not required_regime:
-        return False
-
-    if regime == required_regime:
-        return True
-
-    return (
-        regime == "MIXED"
-        and decision == "A+"
-        and composite_score >= SWING_MIXED_REGIME_ELITE_SCORE
-    )
+def _regime_allowed_for_strict_mode(regime):
+    """Return True when regime is allowed by strict sniper mode."""
+    return regime in SWING_ALLOWED_REGIMES
 
 
 def _truthy_benchmark_flag(value):
@@ -200,7 +190,7 @@ def swing_benchmark_reject_reasons(setup, reasoning, tech=None):
     reasons = []
 
     direction = setup.get("direction")
-    if direction not in SWING_DIRECTION_REGIMES:
+    if direction not in {"CALL", "PUT"}:
         reasons.append("direction is not CALL or PUT")
 
     decision = reasoning.get("decision")
@@ -221,15 +211,11 @@ def swing_benchmark_reject_reasons(setup, reasoning, tech=None):
         reasons.append("AI reject risks: " + "; ".join(ai_reject_reasons))
 
     regime = (reasoning.get("regime") or {}).get("regime")
-    required_regime = SWING_DIRECTION_REGIMES.get(direction)
-    regime_aligned = _regime_matches_swing_direction(
-        regime,
-        required_regime,
-        decision,
-        composite_score,
-    )
-    if required_regime and not regime_aligned:
-        reasons.append(f"regime {regime or 'missing'} is not {required_regime}")
+    if not _regime_allowed_for_strict_mode(regime):
+        allowed = "/".join(sorted(SWING_ALLOWED_REGIMES))
+        reasons.append(f"regime {regime or 'missing'} is not {allowed}")
+
+    regime_aligned = _regime_allowed_for_strict_mode(regime)
 
     mtf_structure = (reasoning.get("mtf") or {}).get("structure")
     if mtf_structure not in SWING_ALLOWED_MTF_STRUCTURES and not (

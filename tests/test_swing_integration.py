@@ -297,12 +297,12 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
 
         self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
 
-    def test_swing_benchmark_rejects_non_elite_a_plus_call_in_mixed_regime(self):
+    def test_swing_benchmark_accepts_non_elite_a_plus_call_in_mixed_regime(self):
         reasoning = self._reasoning()
         reasoning["final_score"] = 99
         reasoning["regime"]["regime"] = "MIXED"
 
-        self.assertFalse(meets_swing_benchmark(self._setup(), reasoning))
+        self.assertTrue(meets_swing_benchmark(self._setup(), reasoning))
 
     def test_swing_benchmark_accepts_elite_mixed_mtf_with_momentum_confirmation(self):
         setup = self._setup()
@@ -338,7 +338,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
         setup["risk_reward"] = 1.8
         reasoning = self._reasoning()
         reasoning["decision"] = "A"
-        reasoning["final_score"] = 88
+        reasoning["final_score"] = 92
         reasoning["mtf"]["structure"] = "GOOD_ALIGNMENT"
         reasoning["vision"]["quality"] = "GOOD"
 
@@ -357,7 +357,7 @@ class SwingIntegrationTelegramSendTests(unittest.TestCase):
     def test_swing_benchmark_rejects_near_miss_criteria(self):
         near_misses = (
             ("final_score", 87),
-            ("regime.regime", "TRENDING_BEAR"),
+            ("regime.regime", "CHOPPY"),
             ("mtf.structure", "MIXED_ALIGNMENT"),
             ("execution.quality", "BAD"),
             ("vision.quality", "NEUTRAL"),

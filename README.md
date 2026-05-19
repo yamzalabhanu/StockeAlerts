@@ -8,6 +8,17 @@ StockeAlerts is an AI-assisted trading platform for intraday scalping, swing tra
 
 ## 🆕 Latest Platform Updates
 
+
+### ✅ README Consistency Refresh (May 2026)
+
+This README has been refreshed to match the current code defaults and behavior:
+
+- Daily trade cap documentation is consistently `MAX_TRADES_PER_TRADING_DAY=25` across ranked alerts and paper options automation.
+- Intraday quality windows now consistently reflect regular-session defaults: `09:30-13:30` and `13:30-14:59` (New York time).
+- Existing model-default references remain aligned with current config (`gpt-5-mini` reasoning/vision defaults).
+
+---
+
 ### 🎯 Adaptive Precision Ensemble + Probabilistic Quality Gates
 
 The latest alert-quality path now combines technical score, chart vision, market regime, multi-timeframe/setup structure, execution quality, and learned confidence into one weighted ensemble confidence profile. Instead of rejecting every imperfect setup immediately, former hard stops such as execution warnings, setup-filter warnings/rejections, mixed MTF alignment, or weak vision can become explicit probability penalties. The final report exposes component scores, setup-decay/chase risk, no-trade probability, win/continuation/reversal/trap probabilities, and an `S-Tier` / `A-Tier` / `B-Tier` / `NO_TRADE` quality rank.
@@ -115,7 +126,7 @@ Chart capture and AI vision now normalize symbols before opening TradingView and
 
 ### 🧭 Expanded Master Watchlist + Stricter Quality Windows
 
-The scan universe now keeps the curated `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` tiers, while also documenting the expanded `MASTER_WATCHLIST` used to track liquid ETFs, leveraged products, AI/semiconductor leaders, big tech, high-beta crypto/fintech names, biotech, energy, industrials, retail, travel, and other active movers. Intraday quality windows were tightened to the highest-opportunity parts of the day (`08:30-11:30` and `13:30-14:59` ET), and the default intraday alert threshold is now `95` so the ranked-alert flow favors cleaner A+ setups.
+The scan universe now keeps the curated `CORE_WATCHLIST`, `SECONDARY_WATCHLIST`, and `SPEC_WATCHLIST` tiers, while also documenting the expanded `MASTER_WATCHLIST` used to track liquid ETFs, leveraged products, AI/semiconductor leaders, big tech, high-beta crypto/fintech names, biotech, energy, industrials, retail, travel, and other active movers. Intraday quality windows were tightened to the highest-opportunity parts of the day (`09:30-13:30` and `13:30-14:59` ET), and the default intraday alert threshold is now `95` so the ranked-alert flow favors cleaner A+ setups.
 
 Key defaults include:
 
@@ -177,7 +188,7 @@ Key controls include:
 | `MAX_INTRADAY_ALERTS_PER_SCAN` | Maximum intraday alerts per completed scan, defaults to `5` |
 | `MAX_SWING_ALERTS_PER_SCAN` | Maximum swing alerts per completed scan, defaults to `5` |
 | `MAX_HIGH_QUALITY_ALERTS_PER_SCAN` | Optional quieter global cap, clamped by the per-type caps |
-| `MAX_TRADES_PER_TRADING_DAY` | Market-local daily cap for ranked trade alerts and option buys, defaults to `10` |
+| `MAX_TRADES_PER_TRADING_DAY` | Market-local daily cap for ranked trade alerts and option buys, defaults to `25` |
 | `ETF_ALERT_SYMBOLS` | Built-in ETF/sector ETF bucket used by ranked alert selection |
 
 ---

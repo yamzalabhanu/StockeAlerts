@@ -759,15 +759,12 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             print(f"{ticker}: telegram send failed; intraday alert not counted or ordered")
             return False
 
-        if risk_action == "WATCH_ONLY":
-            print(f"{ticker}: Phase 5 risk plan is WATCH_ONLY; skipping automated option buy")
-        else:
-            maybe_buy_recommended_option(
-                ticker=ticker,
-                direction=direction,
-                option_contract=option_contract or {},
-                telegram_sender=self.send_telegram_msg,
-            )
+        maybe_buy_recommended_option(
+            ticker=ticker,
+            direction=direction,
+            option_contract=option_contract or {},
+            telegram_sender=self.send_telegram_msg,
+        )
 
         mark_alerted_today(ticker)
 
@@ -988,4 +985,3 @@ Return ONLY valid JSON with verdict, confidence, entry, stop, target, risk_rewar
             except Exception as e:
                 print(f"Scan loop error: {e}")
                 await self.sleep_with_option_management(SCAN_INTERVAL_SEC)
-

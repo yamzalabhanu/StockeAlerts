@@ -298,6 +298,9 @@ MIN_EXTENDED_HOURS_VOLUME = int(os.getenv("MIN_EXTENDED_HOURS_VOLUME", "500000")
 MIN_EXTENDED_HOURS_CHANGE_PCT = float(os.getenv("MIN_EXTENDED_HOURS_CHANGE_PCT", "2.0"))
 MIN_AUTO_OPTION_VOLUME = int(os.getenv("MIN_AUTO_OPTION_VOLUME", "1000"))
 MIN_AUTO_OPTION_OPEN_INTEREST = int(os.getenv("MIN_AUTO_OPTION_OPEN_INTEREST", "5000"))
+AUTO_WATCHLIST_OPTIONS_LEADERS_ENABLED = os.getenv("AUTO_WATCHLIST_OPTIONS_LEADERS_ENABLED", "true").lower() == "true"
+AUTO_WATCHLIST_OPTIONS_LEADERS_COUNT = int(os.getenv("AUTO_WATCHLIST_OPTIONS_LEADERS_COUNT", "15"))
+AUTO_WATCHLIST_OPTIONS_LEADERS_SCAN_LIMIT = int(os.getenv("AUTO_WATCHLIST_OPTIONS_LEADERS_SCAN_LIMIT", "150"))
 
 # Symbols from the auto mover list are allowed, but alerts still must pass the same scoring,
 # intraday confirmation, AI gate, liquidity, and cooldown filters.

@@ -438,6 +438,66 @@ class StockTechnicalBase:
         )
         return ranked
 
+    def _get_yesterday_options_leaders(self, day: dt.date) -> List[Dict[str, Any]]:
+        """Return top tickers by prior-session options volume and open interest."""
+        if not AUTO_WATCHLIST_OPTIONS_LEADERS_ENABLED:
+            return []
+
+        try:
+            grouped = self._get_grouped_daily_aggs(day)
+        except Exception as e:
+            print(f"Options leaders grouped aggs unavailable for {day}: {e}")
+            return []
+
+        base = []
+        for item in grouped:
+            ticker = item.get("T")
+            if not ticker:
+                continue
+            close_price = safe_float(item.get("c"))
+            high_price = safe_float(item.get("h"))
+            price = close_price or high_price
+            if price < MIN_STOCK_PRICE:
+                continue
+            base.append(
+                {
+                    "ticker": ticker,
+                    "day": day,
+                    "price": price,
+                    "prev_close": safe_float(item.get("o")) or price,
+                    "daily_volume": safe_float(item.get("v")),
+                    "daily_change_pct": abs(pct_diff(close_price, safe_float(item.get("o"))) or 0),
+                }
+            )
+
+        base.sort(key=lambda x: safe_float(x.get("daily_volume")), reverse=True)
+
+        leaders = []
+        for candidate in base[:AUTO_WATCHLIST_OPTIONS_LEADERS_SCAN_LIMIT]:
+            try:
+                metrics = self._get_options_activity_metrics(candidate["ticker"])
+            except Exception as e:
+                print(f"Options leaders metrics skipped for {candidate['ticker']}: {e}")
+                continue
+
+            option_volume = int(safe_float(metrics.get("option_volume")))
+            option_oi = int(safe_float(metrics.get("option_open_interest")))
+            if option_volume <= 0 and option_oi <= 0:
+                continue
+
+            enriched = {**candidate, **metrics}
+            leaders.append(enriched)
+
+        leaders.sort(
+            key=lambda x: (
+                safe_float(x.get("option_volume")),
+                safe_float(x.get("option_open_interest")),
+                safe_float(x.get("daily_volume")),
+            ),
+            reverse=True,
+        )
+        return leaders[:AUTO_WATCHLIST_OPTIONS_LEADERS_COUNT]
+
     def get_active_tickers_for_day(self, day: Union[str, dt.date, dt.datetime]) -> set:
         parsed_day = self._parse_watchlist_day(day)
         if parsed_day is None:
@@ -556,8 +616,14 @@ class StockTechnicalBase:
                 ),
                 reverse=True,
             )
+            previous_day = today - dt.timedelta(days=1)
+            options_leaders = self._get_yesterday_options_leaders(previous_day)
+            existing = {c["ticker"] for c in candidates}
+            for leader in options_leaders:
+                if leader["ticker"] not in existing:
+                    candidates.append(leader)
             return self._rank_watchlist_candidates(
-                candidates, "snapshot+extended+options"
+                candidates, "snapshot+extended+options+leaders"
             )
 
         except Exception as e:

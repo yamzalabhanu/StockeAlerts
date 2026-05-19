@@ -3,6 +3,7 @@ import asyncio
 from bot import StockTechnicalAIBot
 from config import BASE_WATCHLIST
 from bot_enhancements import apply_enhancements
+from logging_setup import enable_timestamped_prints
 
 
 async def main():
@@ -16,4 +17,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    enable_timestamped_prints()
     asyncio.run(main())

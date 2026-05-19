@@ -1,4 +1,6 @@
 import os
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -18,6 +20,16 @@ client = (
     if ALPACA_API_KEY and ALPACA_SECRET_KEY
     else None
 )
+
+
+def _within_trading_window(now: datetime | None = None) -> bool:
+    """Return True during Monday-Friday, 9:30 AM-4:00 PM Eastern Time."""
+    eastern = ZoneInfo("America/New_York")
+    current = now.astimezone(eastern) if now else datetime.now(eastern)
+    if current.weekday() >= 5:
+        return False
+    current_time = current.time()
+    return time(9, 30) <= current_time <= time(16, 0)
 
 
 def normalize_option_symbol(option_symbol: str) -> str:
@@ -48,6 +60,8 @@ def place_trade(symbol, qty, side):
         return reason
     if client is None:
         return "Trade failed: ALPACA_API_KEY and ALPACA_SECRET_KEY are required"
+    if not _within_trading_window():
+        return "Trade failed: orders are only submitted during trading hours (Mon-Fri, 9:30 AM-4:00 PM ET)"
 
     order = MarketOrderRequest(
         symbol=symbol,
@@ -77,6 +91,8 @@ def place_option_limit_order(option_symbol: str, contracts: int, side: str, limi
         return reason
     if client is None:
         return "Option order failed: ALPACA_API_KEY and ALPACA_SECRET_KEY are required"
+    if not _within_trading_window():
+        return "Option order failed: orders are only submitted during trading hours (Mon-Fri, 9:30 AM-4:00 PM ET)"
 
     alpaca_symbol = normalize_option_symbol(option_symbol)
     if not alpaca_symbol:

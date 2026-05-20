@@ -12,6 +12,18 @@ def test_within_trading_window_allows_weekday_session():
 
 
 
+
+
+def test_within_trading_window_allows_sell_all_day_session():
+    ts = datetime(2026, 5, 18, 14, 30, tzinfo=ZoneInfo("America/New_York"))  # Monday
+    assert broker._within_trading_window(ts, side="SELL") is True
+
+
+def test_within_trading_window_blocks_sell_after_close():
+    ts = datetime(2026, 5, 18, 16, 1, tzinfo=ZoneInfo("America/New_York"))  # Monday
+    assert broker._within_trading_window(ts, side="SELL") is False
+
+
 def test_within_trading_window_blocks_after_11am():
     ts = datetime(2026, 5, 18, 11, 1, tzinfo=ZoneInfo("America/New_York"))  # Monday
     assert broker._within_trading_window(ts) is False

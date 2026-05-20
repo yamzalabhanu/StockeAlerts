@@ -10,6 +10,13 @@ def test_within_trading_window_allows_weekday_session():
     assert broker._within_trading_window(ts) is True
 
 
+
+
+def test_within_trading_window_blocks_after_11am():
+    ts = datetime(2026, 5, 18, 11, 1, tzinfo=ZoneInfo("America/New_York"))  # Monday
+    assert broker._within_trading_window(ts) is False
+
+
 def test_within_trading_window_blocks_weekend():
     ts = datetime(2026, 5, 17, 10, 0, tzinfo=ZoneInfo("America/New_York"))  # Sunday
     assert broker._within_trading_window(ts) is False
